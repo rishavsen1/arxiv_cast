@@ -153,9 +153,16 @@ def arxiv_podcast():
     length = data.get("length", "medium")
     custom_style = data.get("custom_style") or None
     date = data.get("date")
+    paper_ids = data.get("paper_ids") or None
+    if isinstance(paper_ids, list):
+        paper_ids = [str(p).strip() for p in paper_ids if str(p).strip()]
+        if not paper_ids:
+            paper_ids = None
+    else:
+        paper_ids = None
     try:
         mod = _arxiv_intel()
-        result = mod.generate_podcast_and_synopsis(style=style, length=length, custom_style=custom_style, date=date)
+        result = mod.generate_podcast_and_synopsis(style=style, length=length, custom_style=custom_style, date=date, paper_ids=paper_ids)
         return jsonify({"ok": True, "result": result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

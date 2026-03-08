@@ -197,20 +197,38 @@ def _build_matrix_table(rows, empty_message):
     current_date = ""
     for row in rows:
         if new_schema:
-            tag, date_val, title, url, abstract, other_cats = row[1], row[4], row[2], row[3], row[5], (row[6] or "").strip()
+            row_id, tag, title, url, date_val, abstract, other_cats = (
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                (row[6] or "").strip(),
+            )
         else:
-            tag, date_val, title, url, abstract, other_cats = row[4], row[3], row[1], row[2], row[5], ""
+            # Legacy: (id, title, url, date, category, abstract)
+            row_id, tag, title, url, date_val, abstract, other_cats = (
+                row[0],
+                row[4],
+                row[1],
+                row[2],
+                row[3],
+                row[5],
+                "",
+            )
         tag_class = tag.replace('.', '-')
         if date_val != current_date:
             current_date = date_val
             html += f'''
             <thead>
                 <tr class="bg-slate-800/80">
-                    <th colspan="4" class="p-3 text-sky-400 uppercase text-xs font-bold tracking-[0.2em] border-b border-slate-700">
+                    <th colspan="5" class="p-3 text-sky-400 uppercase text-xs font-bold tracking-[0.2em] border-b border-slate-700">
                         DATA_LOG: {current_date}
                     </th>
                 </tr>
                 <tr class="text-slate-500 text-[10px] uppercase border-b border-slate-700 bg-slate-900">
+                    <th class="p-4 w-16">Use</th>
                     <th class="p-4 w-32">Domain</th>
                     <th class="p-4 w-28">Other tags</th>
                     <th class="p-4 w-1/4">Title / Source</th>
@@ -219,7 +237,10 @@ def _build_matrix_table(rows, empty_message):
             </thead>
             <tbody>'''
         html += f'''
-        <tr class="border-b border-slate-800/50 hover:bg-sky-500/5 transition-colors group">
+        <tr class="border-b border-slate-800/50 hover:bg-sky-500/5 transition-colors group" data-paper-id="{row_id}">
+            <td class="p-4 align-top">
+                <input type="checkbox" name="matrix-paper" value="{row_id}" class="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500" checked>
+            </td>
             <td class="p-4 align-top">
                 <span class="tag-pill tag-{tag_class}">{tag}</span>
             </td>
@@ -315,7 +336,7 @@ PODCAST_STYLES = {
 LENGTH_WORDS = {"short": "300–500", "medium": "700–1000", "long": "1200–1800"}
 
 
-def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=None, date=None):
+def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=None, date=None, paper_ids=None):
     style_key = style.lower() if isinstance(style, str) else "easy"
     length_key = length.lower() if isinstance(length, str) else "medium"
     word_target = LENGTH_WORDS.get(length_key, LENGTH_WORDS["medium"])
@@ -323,24 +344,52 @@ def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=No
 
     print(f"Initializing AI Analysis using {LLM_MODEL} (style={style_key}, length={length_key})...")
     conn = sqlite3.connect(DB_PATH)
-    if date:
-        target_date = date
-        cursor = conn.execute("SELECT COUNT(1) FROM papers WHERE date = ?", (date,))
-        if cursor.fetchone()[0] == 0:
+    papers = []
+    target_date = None
+    if paper_ids:
+        placeholders = ",".join("?" * len(paper_ids))
+        cursor = conn.execute(
+            f"SELECT title, category, abstract, date FROM papers WHERE id IN ({placeholders})",
+            paper_ids,
+        )
+        rows = cursor.fetchall()
+        if not rows:
             conn.close()
-            print(f"No papers in database for date {date}.")
-            return None
+            print("No matching papers for requested IDs; falling back to date-based selection.")
+        else:
+            # Deduplicate by (title, category) in case multiple rows share an id
+            seen = set()
+            for title, category, abstract, d in rows:
+                key = (title, category)
+                if key in seen:
+                    continue
+                seen.add(key)
+                papers.append((title, category, abstract))
+            # Use the most recent date among the selected papers for logging/metadata
+            dates = [d for _, _, _, d in rows if d]
+            if dates:
+                target_date = max(dates)
+    if not papers:
+        if date:
+            target_date = date
+            cursor = conn.execute("SELECT COUNT(1) FROM papers WHERE date = ?", (date,))
+            if cursor.fetchone()[0] == 0:
+                conn.close()
+                print(f"No papers in database for date {date}.")
+                return None
+        else:
+            cursor = conn.execute("SELECT MAX(date) FROM papers")
+            target_date = cursor.fetchone()[0]
+            if not target_date:
+                print("Database is empty. No papers to synthesize.")
+                conn.close()
+                return None
+        print(f"Targeting papers from batch: {target_date}")
+        cursor = conn.execute("SELECT title, category, abstract FROM papers WHERE date = ?", (target_date,))
+        papers = cursor.fetchall()
+        conn.close()
     else:
-        cursor = conn.execute("SELECT MAX(date) FROM papers")
-        target_date = cursor.fetchone()[0]
-        if not target_date:
-            print("Database is empty. No papers to synthesize.")
-            conn.close()
-            return None
-    print(f"Targeting papers from batch: {target_date}")
-    cursor = conn.execute("SELECT title, category, abstract FROM papers WHERE date = ?", (target_date,))
-    papers = cursor.fetchall()
-    conn.close()
+        print(f"Targeting {len(papers)} selected papers for podcast (latest date: {target_date}).")
 
     if not OPENROUTER_KEY:
         raise RuntimeError(

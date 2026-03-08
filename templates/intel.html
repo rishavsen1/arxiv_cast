@@ -357,6 +357,14 @@
             // Use same date as matrix: specific date if "Use specific date" is on, else latest
             var useDate = document.getElementById('arxiv-use-date').checked;
             var date = useDate ? (document.getElementById('arxiv-date').value || today) : null;
+            // Collect selected papers from the current matrix view; if none selected, use all visible
+            var checked = Array.from(document.querySelectorAll('#matrix-container input[name=matrix-paper]:checked'));
+            var paperIds = checked.map(function(cb) { return cb.value; });
+            if (paperIds.length === 0) {
+                paperIds = Array.from(document.querySelectorAll('#matrix-container tr[data-paper-id]')).map(function(tr) {
+                    return tr.getAttribute('data-paper-id');
+                });
+            }
             var status = document.getElementById('podcast-status');
             var btn = document.getElementById('podcast-generate-btn');
             var spinner = document.getElementById('podcast-spinner');
@@ -370,7 +378,7 @@
             fetch('/api/arxiv/podcast', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ style: style, length: length, custom_style: customStyle, date: date })
+                body: JSON.stringify({ style: style, length: length, custom_style: customStyle, date: date, paper_ids: paperIds })
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {
