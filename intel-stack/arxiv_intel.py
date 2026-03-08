@@ -1,6 +1,7 @@
 import arxiv
 import sqlite3
 import os
+import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ import asyncio
 import edge_tts
 import subprocess
 import requests
+from pydub import AudioSegment
 
 # Load .env from intel-stack directory (safe for cron/cwd)
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -38,6 +40,10 @@ CATEGORIES_TREE = {
 }
 CATEGORIES = [f"{l1}.{l2}" for l1, subs in CATEGORIES_TREE.items() for l2 in subs]
 PAPERS_PER_TAG = 5
+
+# Two-host podcast voices (Notebook LM style: distinct voices for interactive conversation)
+EDGE_TTS_VOICE_ALEX = "en-US-GuyNeural"   # male
+EDGE_TTS_VOICE_SAM = "en-US-JennyNeural"  # female
 
 # --- AI CONFIGURATION (key from .env only; never commit .env) ---
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
@@ -398,11 +404,12 @@ def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=No
         )
     intel_data = "\n\n".join([f"Category: {p[1]} | Title: {p[0]} | Abstract: {p[2]}" for p in papers])
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY)
-    prompt = f"""You are writing a script for "ArxivCast", a two-host podcast about arXiv papers. The hosts are ALEX and SAM. They speak in turn; keep the conversation natural and concise.
+    prompt = f"""You are writing a script for "ArxivCast", a two-host podcast about arXiv papers. The hosts are ALEX and SAM. Make it an interactive conversation: they take turns, react to each other, ask short follow-ups, and build on what the other said (Notebook LM style).
 
 RULES:
 - Write the script as a two-person dialogue. Every line must start with exactly "ALEX: " or "SAM: " (capital letters, then a space), then the spoken text. No other formatting (no asterisks, no sound-effect brackets).
-- First, write a SHORT HEADLINES ROUND: in a connected, flowing way, each host gives a one-sentence TLDR for a subset of the papers (split between them), so the listener gets a quick round of "what's in this episode" before you go deeper.
+- Keep turns conversational: short back-and-forth where it fits, e.g. one host introduces a paper, the other reacts or asks a question, then the first expands. Vary who speaks first from topic to topic.
+- First, write a SHORT HEADLINES ROUND: each host gives a one-sentence TLDR for a subset of the papers (split between them), so the listener gets a quick "what's in this episode" before you go deeper.
 - Then continue with the main dialogue, covering the papers in more detail according to the style below.
 - Target total length: approximately {word_target} words.
 - Style: {style_instruction}
@@ -443,22 +450,56 @@ Write the full script (headlines round first, then main dialogue) using only "AL
     with open(SYNOPSIS_OUTPUT, "w") as f:
         f.write("\n".join(html_parts))
 
-    # TTS: strip speaker labels so one voice reads naturally
-    tts_lines = []
+    # TTS: two-host style — each host gets a distinct voice, segments concatenated for a real back-and-forth
+    segments = []  # list of ("ALEX" | "SAM", text)
     for line in script_text.split("\n"):
         line = line.strip()
+        if not line:
+            continue
         if line.upper().startswith("ALEX:"):
-            tts_lines.append(line[5:].strip())
+            segments.append(("ALEX", line[5:].strip()))
         elif line.upper().startswith("SAM:"):
-            tts_lines.append(line[4:].strip())
-        elif line:
-            tts_lines.append(line)
-    tts_text = " ".join(tts_lines)
+            segments.append(("SAM", line[4:].strip()))
+        else:
+            # Unlabeled line: assign to last speaker or default to ALEX
+            speaker = segments[-1][0] if segments else "ALEX"
+            segments.append((speaker, line))
 
-    print("Synthesizing Audio Broadcast...")
-    communicate = edge_tts.Communicate(tts_text, "en-US-ChristopherNeural")
-    asyncio.run(communicate.save(AUDIO_OUTPUT))
-    print("Local Podcast Ready.")
+    if not segments:
+        print("No dialogue lines to synthesize.")
+        return {"script_length": 0, "date": target_date}
+
+    print("Synthesizing two-host audio (Alex & Sam)...")
+    voice_map = {"ALEX": EDGE_TTS_VOICE_ALEX, "SAM": EDGE_TTS_VOICE_SAM}
+    temp_dir = tempfile.mkdtemp(prefix="arxivcast_tts_")
+    paths = []
+    try:
+        for i, (speaker, text) in enumerate(segments):
+            if not text:
+                continue
+            voice = voice_map.get(speaker, EDGE_TTS_VOICE_ALEX)
+            path = os.path.join(temp_dir, f"seg_{i:04d}.mp3")
+            communicate = edge_tts.Communicate(text, voice)
+            asyncio.run(communicate.save(path))
+            paths.append(path)
+        # Concatenate in order
+        combined = None
+        for path in paths:
+            seg = AudioSegment.from_mp3(path)
+            combined = seg if combined is None else combined + seg
+        if combined is not None:
+            combined.export(AUDIO_OUTPUT, format="mp3")
+        print("Local Podcast Ready (two voices).")
+    finally:
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        try:
+            os.rmdir(temp_dir)
+        except OSError:
+            pass
 
     today = datetime.now().strftime("%Y-%m-%d")
     archive_filename = f"briefing_{today}.mp3"
