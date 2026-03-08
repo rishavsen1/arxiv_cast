@@ -20,3 +20,5 @@ intel-stack/arxiv_intel.html
 intel-stack/arxiv_synopsis.html
 
 *.db
+static/audio/daily_briefing.mp3
+pi_dashboard.service
