@@ -71,6 +71,14 @@ def init_db():
     conn.commit()
     conn.close()
 
+
+def clear_papers():
+    """Delete all rows from the papers table. Leaves table structure intact."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM papers")
+    conn.commit()
+    conn.close()
+
 # XML namespaces used in arXiv Atom responses
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
@@ -106,7 +114,9 @@ def _fetch_by_date_http(category, papers_per_tag, date):
         primary_el = entry.find("arxiv:primary_category", _ATOM_NS)
         all_cats = [c.get("term") for c in entry.findall("atom:category", _ATOM_NS) if c.get("term")]
         primary_cat = primary_el.get("term", category) if primary_el is not None else (all_cats[0] if all_cats else category)
-        other = [t for t in all_cats if t != primary_cat]
+        # For the "Other tags" column, always exclude the domain we're displaying (category/cat),
+        # not just the primary arXiv category, so the main tag does not appear twice.
+        other = [t for t in all_cats if t != category]
         other_categories = ", ".join(sorted(other)) if other else ""
         if entry_id is None or title_el is None:
             continue
@@ -164,8 +174,8 @@ def fetch_and_store(categories=None, papers_per_tag=None, date=None):
                 total_found += 1
                 other = ""
                 if hasattr(result, "categories") and result.categories:
-                    primary = getattr(result, "primary_category", None) or (result.categories[0] if result.categories else None)
-                    other = ", ".join(sorted(c for c in result.categories if c != primary)) if primary else ", ".join(sorted(result.categories))
+                    # Exclude the domain we're displaying (cat) from "Other tags" so it doesn't duplicate
+                    other = ", ".join(sorted(c for c in result.categories if c != cat))
                 conn.execute(
                     "INSERT OR IGNORE INTO papers (id, category, title, url, date, abstract, other_categories) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (result.entry_id, cat, result.title, result.pdf_url, result.published.strftime("%Y-%m-%d"), result.summary, other),

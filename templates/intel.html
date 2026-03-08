@@ -74,10 +74,15 @@
                     </div>
                     <div>
                         <label class="block text-[10px] text-slate-500 uppercase mb-1">&nbsp;</label>
-                        <button type="button" id="arxiv-fetch-btn" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2">
-                            <span id="arxiv-fetch-spinner" class="spinner hidden"></span>
-                            <span id="arxiv-fetch-label">Search & Populate</span>
-                        </button>
+                        <div class="flex gap-2">
+                            <button type="button" id="arxiv-fetch-btn" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2">
+                                <span id="arxiv-fetch-spinner" class="spinner hidden"></span>
+                                <span id="arxiv-fetch-label">Search & Populate</span>
+                            </button>
+                            <button type="button" id="arxiv-clear-btn" class="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm font-semibold rounded-lg transition border border-slate-500">
+                                Clear table
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <p id="arxiv-fetch-status" class="text-xs text-slate-500 mt-2 hidden"></p>
@@ -312,6 +317,33 @@
                 status.textContent = 'Error: ' + err.message;
                 status.className = 'text-xs text-red-400 mt-2';
             });
+        });
+
+        document.getElementById('arxiv-clear-btn').addEventListener('click', function() {
+            var btn = this;
+            var status = document.getElementById('arxiv-fetch-status');
+            if (!confirm('Clear all papers from the table? You can repopulate with Search & Populate.')) return;
+            btn.disabled = true;
+            fetch('/api/arxiv/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    btn.disabled = false;
+                    status.classList.remove('hidden');
+                    if (data.ok) {
+                        status.textContent = 'Table cleared.';
+                        status.className = 'text-xs text-slate-400 mt-2';
+                        document.getElementById('matrix-container').innerHTML = '<p class="text-slate-500 text-sm p-6">Choose categories and date above, then click <strong>Search &amp; Populate</strong> to fetch and show papers.</p>';
+                    } else {
+                        status.textContent = 'Error: ' + (data.error || 'Unknown');
+                        status.className = 'text-xs text-red-400 mt-2';
+                    }
+                })
+                .catch(function(err) {
+                    btn.disabled = false;
+                    status.classList.remove('hidden');
+                    status.textContent = 'Error: ' + err.message;
+                    status.className = 'text-xs text-red-400 mt-2';
+                });
         });
 
         document.getElementById('podcast-style').addEventListener('change', function() {

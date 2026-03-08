@@ -108,6 +108,16 @@ def arxiv_synopsis_html():
         mimetype="text/html; charset=utf-8"
     )
 
+# ArxivCast: clear papers table
+@app.route('/api/arxiv/clear', methods=['POST'])
+def arxiv_clear():
+    try:
+        mod = _arxiv_intel()
+        mod.clear_papers()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # ArxivCast: fetch papers and regenerate matrix
 @app.route('/api/arxiv/fetch', methods=['POST'])
 def arxiv_fetch():
