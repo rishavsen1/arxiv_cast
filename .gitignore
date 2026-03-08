@@ -1,1 +1,22 @@
+# Virtual env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local / secrets (do not commit)
+.env
+*.local
+
+# intel-stack: part of this repo; exclude secrets and generated/local data
+intel-stack/.env
+intel-stack/*.db
+intel-stack/arxiv_intel.html
+intel-stack/arxiv_synopsis.html
+
 *.db

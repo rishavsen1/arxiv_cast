@@ -1,0 +1,9 @@
+# Web logger dashboard
+flask
+psutil
+requests
+
+# ArxivCast (intel-stack) - required when using /intel Search & Populate or podcast
+arxiv
+openai
+edge-tts
