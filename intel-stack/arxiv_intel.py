@@ -41,14 +41,45 @@ CATEGORIES_TREE = {
 CATEGORIES = [f"{l1}.{l2}" for l1, subs in CATEGORIES_TREE.items() for l2 in subs]
 PAPERS_PER_TAG = 5
 
-# Two-host podcast voices (Notebook LM style: distinct voices for interactive conversation)
-EDGE_TTS_VOICE_ALEX = "en-US-GuyNeural"   # male
-EDGE_TTS_VOICE_SAM = "en-US-JennyNeural"  # female
+# Two-host podcast voices — use multilingual neural for more natural, conversational flow (still free Edge TTS)
+# Override with EDGE_TTS_VOICE_ALEX / EDGE_TTS_VOICE_SAM in .env if you prefer Guy/Jenny or others.
+EDGE_TTS_VOICE_ALEX = os.environ.get("EDGE_TTS_VOICE_ALEX", "en-US-AndrewMultilingualNeural")   # male
+EDGE_TTS_VOICE_SAM = os.environ.get("EDGE_TTS_VOICE_SAM", "en-US-EmmaMultilingualNeural")     # female
+
+# TTS engine: "edge" (default, free) | "openai" (ChatGPT-style natural voices; needs OPENAI_API_KEY)
+TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge").strip().lower()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# OpenAI TTS: two distinct voices for Alex/Sam (marin/cedar recommended by OpenAI for quality)
+OPENAI_TTS_VOICE_ALEX = os.environ.get("OPENAI_TTS_VOICE_ALEX", "cedar")   # male
+OPENAI_TTS_VOICE_SAM = os.environ.get("OPENAI_TTS_VOICE_SAM", "nova")     # female
+OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1-hd")  # or gpt-4o-mini-tts for more expressiveness
 
 # --- AI CONFIGURATION (key from .env only; never commit .env) ---
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
 LLM_MODEL = "arcee-ai/trinity-large-preview:free"
 AUDIO_OUTPUT = "/home/rishav/weblogger/static/audio/daily_briefing.mp3"
+
+
+def _synthesize_segment(engine: str, speaker: str, text: str, out_path: str) -> None:
+    """Synthesize one (speaker, text) segment to MP3 at out_path. engine is 'edge' or 'openai'."""
+    if engine == "openai":
+        voice_alex = OPENAI_TTS_VOICE_ALEX
+        voice_sam = OPENAI_TTS_VOICE_SAM
+        voice = voice_alex if speaker == "ALEX" else voice_sam
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        with client.audio.speech.with_streaming_response.create(
+            model=OPENAI_TTS_MODEL,
+            voice=voice,
+            input=text,
+            response_format="mp3",
+        ) as response:
+            response.stream_to_file(out_path)
+        return
+    # Edge TTS
+    voice_map = {"ALEX": EDGE_TTS_VOICE_ALEX, "SAM": EDGE_TTS_VOICE_SAM}
+    voice = voice_map.get(speaker, EDGE_TTS_VOICE_ALEX)
+    communicate = edge_tts.Communicate(text, voice)
+    asyncio.run(communicate.save(out_path))
 
 
 def init_db():
@@ -469,18 +500,19 @@ Write the full script (headlines round first, then main dialogue) using only "AL
         print("No dialogue lines to synthesize.")
         return {"script_length": 0, "date": target_date}
 
-    print("Synthesizing two-host audio (Alex & Sam)...")
-    voice_map = {"ALEX": EDGE_TTS_VOICE_ALEX, "SAM": EDGE_TTS_VOICE_SAM}
+    engine = "openai" if TTS_ENGINE == "openai" and OPENAI_API_KEY else "edge"
+    if engine == "openai":
+        print("Synthesizing two-host audio (OpenAI TTS — natural / ChatGPT-style voices)...")
+    else:
+        print("Synthesizing two-host audio (Edge TTS — Alex & Sam)...")
     temp_dir = tempfile.mkdtemp(prefix="arxivcast_tts_")
     paths = []
     try:
         for i, (speaker, text) in enumerate(segments):
             if not text:
                 continue
-            voice = voice_map.get(speaker, EDGE_TTS_VOICE_ALEX)
             path = os.path.join(temp_dir, f"seg_{i:04d}.mp3")
-            communicate = edge_tts.Communicate(text, voice)
-            asyncio.run(communicate.save(path))
+            _synthesize_segment(engine, speaker, text, path)
             paths.append(path)
         # Concatenate in order
         combined = None

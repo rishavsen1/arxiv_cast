@@ -66,7 +66,7 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
 - **Paths**: `DB_PATH` = `intel-stack/arxiv_history.db`; `OUTPUT_HTML` = `intel-stack/arxiv_intel.html`; `SYNOPSIS_OUTPUT` = `intel-stack/arxiv_synopsis.html`. `.env` in intel-stack is loaded for `OPENROUTER_KEY` etc.
 - **Categories**: Two-layer tree `CATEGORIES_TREE` (e.g. `cs` → [AI, LG, SY, RO, NE, CE]; eess, math, stat, econ, physics). Flat list `CATEGORIES` = all `"layer1.layer2"` (e.g. cs.AI, cs.LG).
 - **PODCAST_STYLES** and **LENGTH_WORDS** define style/length presets for the LLM and TTS.
-- **TTS voices**: Alex = `en-US-GuyNeural`, Sam = `en-US-JennyNeural` (two-host, Notebook LM style).
+- **TTS voices**: Configurable engine. **Default (edge, free)**: Alex = `en-US-AndrewMultilingualNeural`, Sam = `en-US-EmmaMultilingualNeural` for more natural, conversational flow; override with `EDGE_TTS_VOICE_ALEX` / `EDGE_TTS_VOICE_SAM`. **Optional (openai, paid)**: `TTS_ENGINE=openai` and `OPENAI_API_KEY` for ChatGPT-style voices. Audio is TTS-only; script text comes from the LLM, then each segment is synthesized by the chosen engine.
 - **DB schema (papers table)**:
   - Columns: `id`, `category`, `title`, `url`, `date`, `abstract`, `other_categories`.
   - Primary key: `(id, category)` so the same paper can appear under multiple categories (e.g. one row for cs.AI, one for cs.LG).
@@ -112,7 +112,7 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
   - **Transcript HTML**: Parses script into lines; for each line starting with `ALEX:` or `SAM:` emits a `<p>` with styled “Alex:” / “Sam:” and the rest; writes to `SYNOPSIS_OUTPUT` (served as synopsis-html).
   - **Two-voice TTS**:
     - Splits script into segments: list of `(speaker, text)` with speaker in `{"ALEX","SAM"}` (unlabeled lines assigned to previous speaker or ALEX).
-    - Creates a temp dir; for each segment, runs `edge_tts.Communicate(text, voice)` with `EDGE_TTS_VOICE_ALEX` or `EDGE_TTS_VOICE_SAM` and saves to a temp MP3.
+    - **Engine**: If `TTS_ENGINE=openai` and `OPENAI_API_KEY` is set, uses OpenAI TTS (ChatGPT-style natural voices); otherwise uses **Edge TTS**. For each segment, `_synthesize_segment(engine, speaker, text, path)` writes a temp MP3.
     - Uses **pydub** to load each segment as `AudioSegment.from_mp3(...)`, concatenates in order, exports to `AUDIO_OUTPUT` (`static/audio/daily_briefing.mp3`).
     - Deletes temp files and temp dir.
   - **Optional rclone**: Uploads `AUDIO_OUTPUT` to `gdrive:ArxivCast_Audio/briefing_{today}.mp3` if rclone is available.
@@ -136,7 +136,7 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
 
 - **arXiv**: `https://export.arxiv.org/api/query` (GET with search_query, max_results, sortBy, submittedDate filter for date-specific fetch).
 - **OpenRouter**: LLM for script generation (OPENROUTER_KEY in intel-stack/.env).
-- **edge-tts**: Two voices (Guy, Jenny) for Alex/Sam; outputs MP3.
+- **TTS**: **edge-tts** (default, free) or **OpenAI TTS** when `TTS_ENGINE=openai` and `OPENAI_API_KEY` set; two voices (Alex/Sam); outputs MP3. **Free, more natural Edge voices**: defaults use `en-US-AndrewMultilingualNeural` and `en-US-EmmaMultilingualNeural`; override with `EDGE_TTS_VOICE_ALEX` / `EDGE_TTS_VOICE_SAM` in `.env` (e.g. `en-US-AriaNeural`, `en-US-BrianMultilingualNeural`). **Other free options** (not wired in yet): **Piper** (offline, CPU-friendly, `piper-tts`); **Dia TTS** / **Coqui XTTS** (natural dialogue / voice clone, need GPU or separate server with OpenAI-compatible API); **Nvidia Magpie** via NIM.
 - **pydub**: Concatenate per-segment MP3s into one file (may require ffmpeg on the system).
 - **rclone** (optional): Backup MP3 to Google Drive.
 
