@@ -38,13 +38,9 @@
             <a href="/" class="text-xs bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg border border-slate-700 transition">Return to Dashboard</a>
         </div>
 
-        <div class="flex gap-6 mb-6 border-b border-slate-800">
-            <button onclick="switchTab('matrix')" id="btn-matrix" class="pb-3 text-xs font-bold uppercase tracking-widest text-sky-400 border-b-2 border-sky-400 transition-all">Data Matrix</button>
-            <button onclick="switchTab('ai')" id="btn-ai" class="pb-3 text-xs font-bold uppercase tracking-widest text-slate-500 border-b-2 border-transparent hover:text-slate-300 transition-all">AI Summary & Audio</button>
-        </div>
-
-        <!-- DATA MATRIX: categories first, then fetch, then table (on-demand) -->
-        <div id="view-matrix" class="block">
+        <div class="flex flex-col lg:flex-row gap-6">
+            <!-- Main: filters + matrix table -->
+            <div class="flex-1 min-w-0">
             <div class="mb-4 p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
                 <span class="text-[10px] text-slate-500 uppercase font-bold block mb-3">1. Choose categories & date (on-demand)</span>
                 <div class="flex flex-wrap items-end gap-4">
@@ -106,86 +102,66 @@
                     <p class="text-slate-500 text-sm p-6">Choose categories and date above, then click <strong>Search & Populate</strong> to fetch and show papers.</p>
                 </div>
             </div>
-        </div>
-
-        <!-- AI: options + on-demand synopsis & audio -->
-        <div id="view-ai" class="hidden">
-            <div class="content-card p-8 min-h-[70vh] flex flex-col md:flex-row gap-8">
-                <div class="w-full md:w-1/3">
-                    <div class="sticky top-8 p-6 bg-slate-900 border border-slate-700 rounded-xl shadow-lg">
-                        <h2 class="text-sky-400 font-bold text-lg mb-1 flex items-center gap-2">
-                            <span class="animate-pulse text-rose-500">●</span> ArxivCast
-                        </h2>
-                        <p class="text-[10px] text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-4">AI two-host dialogue</p>
-                        <div class="mb-4">
-                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Style</label>
-                            <select id="podcast-style" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 mb-2">
-                                <option value="easy">Easy to Understand</option>
-                                <option value="deep">DeepDive</option>
-                                <option value="critique">Critique</option>
-                                <option value="debate">Debate</option>
-                                <option value="custom">Custom</option>
-                            </select>
-                            <div id="podcast-custom-wrap" class="hidden">
-                                <label class="block text-[10px] text-slate-500 uppercase mb-1">Custom style</label>
-                                <textarea id="podcast-custom-style" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2" placeholder="e.g. Focus on reproducibility"></textarea>
-                            </div>
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Length</label>
-                            <select id="podcast-length" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
-                                <option value="short">Short (~1–2 min)</option>
-                                <option value="medium" selected>Medium (~3–5 min)</option>
-                                <option value="long">Long (~6–10 min)</option>
-                            </select>
-                        </div>
-                        <button type="button" id="podcast-generate-btn" class="w-full mb-4 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-lg transition flex items-center justify-center gap-2">
-                            <span id="podcast-spinner" class="spinner hidden"></span>
-                            <span id="podcast-btn-label">Generate podcast</span>
-                        </button>
-                        <p id="podcast-status" class="text-xs text-slate-500 mb-4 hidden"></p>
-                        <audio id="podcast-player" controls class="w-full h-10 rounded-full" style="filter: invert(0.9) hue-rotate(180deg);">
-                            <source src="{{ url_for('static', filename='audio/daily_briefing.mp3') }}" type="audio/mpeg">
-                            Your browser does not support the audio element.
-                        </audio>
-                        <div class="mt-8 border-t border-slate-800 pt-6">
-                            <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2"><span>☁️</span> GDrive Vault</h3>
-                            <div id="archive-list" class="space-y-2 max-h-48 overflow-y-auto pr-2">
-                                <p class="text-xs text-slate-600 italic">Loading…</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="w-full md:w-2/3 md:border-l md:border-slate-800 md:pl-8">
-                    <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-6">Transcript & Synopsis</h3>
-                    <div id="synopsis-container">
-                        <p class="text-slate-500 text-sm">Generate a podcast to see the transcript here.</p>
-                    </div>
-                </div>
             </div>
+
+            <!-- Sidebar: Audio generation + transcript -->
+            <aside class="w-full lg:w-96 flex-shrink-0">
+                <div class="sticky top-4 content-card p-6 space-y-6">
+                    <div>
+                        <h2 class="text-sky-400 font-bold text-lg mb-1 flex items-center gap-2">
+                            <span class="animate-pulse text-rose-500">●</span> Audio
+                        </h2>
+                        <p class="text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-4">AI two-host dialogue</p>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Style</label>
+                        <select id="podcast-style" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 mb-2">
+                            <option value="easy">Easy to Understand</option>
+                            <option value="deep">DeepDive</option>
+                            <option value="critique">Critique</option>
+                            <option value="debate">Debate</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <div id="podcast-custom-wrap" class="hidden">
+                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Custom style</label>
+                            <textarea id="podcast-custom-style" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2" placeholder="e.g. Focus on reproducibility"></textarea>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Length</label>
+                        <select id="podcast-length" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                            <option value="short">Short (~1–2 min)</option>
+                            <option value="medium" selected>Medium (~3–5 min)</option>
+                            <option value="long">Long (~6–10 min)</option>
+                        </select>
+                    </div>
+                    <button type="button" id="podcast-generate-btn" class="w-full px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-lg transition flex items-center justify-center gap-2">
+                        <span id="podcast-spinner" class="spinner hidden"></span>
+                        <span id="podcast-btn-label">Generate podcast</span>
+                    </button>
+                    <p id="podcast-status" class="text-xs text-slate-500 hidden"></p>
+                    <audio id="podcast-player" controls class="w-full h-10 rounded-full" style="filter: invert(0.9) hue-rotate(180deg);">
+                        <source src="{{ url_for('static', filename='audio/daily_briefing.mp3') }}" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="border-t border-slate-800 pt-4">
+                        <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-2"><span>☁️</span> GDrive Vault</h3>
+                        <div id="archive-list" class="space-y-2 max-h-32 overflow-y-auto pr-2">
+                            <p class="text-xs text-slate-600 italic">Loading…</p>
+                        </div>
+                    </div>
+                    <div class="border-t border-slate-800 pt-4">
+                        <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-3">Transcript</h3>
+                        <div id="synopsis-container" class="text-sm text-slate-400 max-h-64 overflow-y-auto pr-2">
+                            <p class="text-slate-500">Generate a podcast to see the transcript here.</p>
+                        </div>
+                    </div>
+                </div>
+            </aside>
         </div>
     </div>
 
     <script>
-        function switchTab(tab) {
-            var matrixView = document.getElementById('view-matrix');
-            var aiView = document.getElementById('view-ai');
-            var matrixBtn = document.getElementById('btn-matrix');
-            var aiBtn = document.getElementById('btn-ai');
-            if (tab === 'matrix') {
-                matrixView.classList.remove('hidden');
-                aiView.classList.add('hidden');
-                matrixBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-sky-400 border-b-2 border-sky-400 transition-all";
-                aiBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-slate-500 border-b-2 border-transparent hover:text-slate-300 transition-all";
-            } else {
-                matrixView.classList.add('hidden');
-                aiView.classList.remove('hidden');
-                aiBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-sky-400 border-b-2 border-sky-400 transition-all";
-                matrixBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-slate-500 border-b-2 border-transparent hover:text-slate-300 transition-all";
-                loadSynopsis();
-            }
-        }
-
         // Date: default = latest (toggle off). When "Use specific date" is on, show picker and cap at today.
         var today = new Date().toISOString().slice(0, 10);
         var arxivDateEl = document.getElementById('arxiv-date');
@@ -237,8 +213,9 @@
                     wrap.appendChild(group);
                 });
                 loadMatrixHtml();
+                loadSynopsis();
             })
-            .catch(function() { loadMatrixHtml(); });
+            .catch(function() { loadMatrixHtml(); loadSynopsis(); });
 
         function loadMatrixHtml() {
             var categories = Array.from(document.querySelectorAll('#arxiv-categories-wrap input[name=arxiv-category]:checked')).map(function(cb) { return cb.value; });
