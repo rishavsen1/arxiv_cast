@@ -55,8 +55,17 @@
                         <p class="text-[10px] text-slate-500 mt-1">Empty = all. Ctrl/Cmd to multi-select.</p>
                     </div>
                     <div>
-                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Date of papers</label>
-                        <input type="date" id="arxiv-date" class="bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Date</label>
+                        <div class="flex items-center gap-3">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="arxiv-use-date" class="w-4 h-4 rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500">
+                                <span class="text-sm text-slate-300">Use specific date</span>
+                            </label>
+                            <div id="arxiv-date-wrap" class="hidden">
+                                <input type="date" id="arxiv-date" max="" class="bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">Off = latest submissions arXiv has.</p>
                     </div>
                     <div>
                         <label class="block text-[10px] text-slate-500 uppercase mb-1">Papers per tag</label>
@@ -176,10 +185,22 @@
             }
         }
 
-        // Default date to today
+        // Date: default = latest (toggle off). When "Use specific date" is on, show picker and cap at today.
         var today = new Date().toISOString().slice(0, 10);
-        document.getElementById('arxiv-date').value = today;
-        document.getElementById('podcast-date').value = today;
+        var arxivDateEl = document.getElementById('arxiv-date');
+        var arxivUseDateCheck = document.getElementById('arxiv-use-date');
+        var arxivDateWrap = document.getElementById('arxiv-date-wrap');
+        arxivDateEl.setAttribute('max', today);
+        arxivDateEl.value = today;
+        arxivUseDateCheck.checked = false;
+        arxivDateWrap.classList.add('hidden');
+        arxivUseDateCheck.addEventListener('change', function() {
+            arxivDateWrap.classList.toggle('hidden', !this.checked);
+            if (this.checked && !arxivDateEl.value) arxivDateEl.value = today;
+        });
+        var podcastDateEl = document.getElementById('podcast-date');
+        podcastDateEl.setAttribute('max', today);
+        podcastDateEl.value = today;
 
         // Load categories from intel-stack (provided by arxiv_intel.CATEGORIES)
         fetch('/api/arxiv/categories')
@@ -220,7 +241,8 @@
         document.getElementById('arxiv-fetch-btn').addEventListener('click', function() {
             var sel = document.getElementById('arxiv-categories');
             var papersPerTag = parseInt(document.getElementById('arxiv-papers-per-tag').value, 10) || 5;
-            var date = document.getElementById('arxiv-date').value || today;
+            var useDate = document.getElementById('arxiv-use-date').checked;
+            var date = useDate ? (document.getElementById('arxiv-date').value || today) : null;
             var categories = Array.from(sel.selectedOptions).map(function(o) { return o.value; });
             var status = document.getElementById('arxiv-fetch-status');
             var btn = document.getElementById('arxiv-fetch-btn');

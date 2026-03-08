@@ -93,16 +93,21 @@ def arxiv_fetch():
     categories = data.get("categories")
     papers_per_tag = data.get("papers_per_tag")
     limit = data.get("limit", 120)
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    # Explicit date in payload = use that day; missing/null = use latest (no date filter)
     date = data.get("date")
-    if not date:
-        from datetime import datetime
-        date = datetime.now().strftime("%Y-%m-%d")
+    if date is not None and date != "":
+        if date > today:
+            return jsonify({"ok": False, "error": "Date cannot be in the future. Choose today or earlier."}), 400
+    else:
+        date = None
     if categories is not None and not isinstance(categories, list):
         categories = [c.strip() for c in str(categories).split(",") if c.strip()]
     try:
         mod = _arxiv_intel()
         mod.init_db()
-        result = mod.fetch_and_store(categories=categories, papers_per_tag=papers_per_tag)
+        result = mod.fetch_and_store(categories=categories, papers_per_tag=papers_per_tag, date=date)
         mod.generate_html(limit=limit, date=date)
         return jsonify({"ok": True, **result})
     except Exception as e:

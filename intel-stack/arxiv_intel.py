@@ -1,12 +1,14 @@
 import arxiv
 import sqlite3
 import os
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
 import asyncio
 import edge_tts
 import subprocess
+import requests
 
 # Load .env from intel-stack directory (safe for cron/cwd)
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -43,30 +45,111 @@ def init_db():
                     (id TEXT PRIMARY KEY, title TEXT, url TEXT, date TEXT, category TEXT, abstract TEXT)''')
     conn.close()
 
-def fetch_and_store(categories=None, papers_per_tag=None):
+# XML namespaces used in arXiv Atom responses
+_ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+
+def _fetch_by_date_http(category, papers_per_tag, date):
+    """
+    Fetch papers for a single category and date via direct arXiv API HTTP call.
+    Returns list of (entry_id, title, pdf_url, date_str, primary_category, abstract).
+    """
+    ymd = date.replace("-", "")
+    # Exact format arXiv API expects: submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]
+    query = f"cat:{category} AND submittedDate:[{ymd}0000 TO {ymd}2359]"
+    params = {
+        "search_query": query,
+        "max_results": papers_per_tag,
+        "sortBy": "submittedDate",
+        "sortOrder": "descending",
+    }
+    url = "https://export.arxiv.org/api/query"
+    resp = requests.get(url, params=params, timeout=30)
+    resp.raise_for_status()
+    root = ET.fromstring(resp.content)
+    rows = []
+    for entry in root.findall(".//atom:entry", _ATOM_NS):
+        entry_id = entry.find("atom:id", _ATOM_NS)
+        title_el = entry.find("atom:title", _ATOM_NS)
+        summary_el = entry.find("atom:summary", _ATOM_NS)
+        published_el = entry.find("atom:published", _ATOM_NS)
+        link_pdf = None
+        for link in entry.findall("atom:link", _ATOM_NS):
+            if link.get("title") == "pdf":
+                link_pdf = link.get("href")
+                break
+        primary = entry.find("arxiv:primary_category", _ATOM_NS)
+        if entry_id is None or title_el is None:
+            continue
+        eid = (entry_id.text or "").strip().split("/")[-1]
+        title = (title_el.text or "").strip().replace("\n", " ")
+        summary = (summary_el.text or "").strip().replace("\n", " ") if summary_el is not None else ""
+        published = (published_el.text or "").strip() if published_el is not None else ""
+        try:
+            dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            date_str = dt.strftime("%Y-%m-%d")
+        except Exception:
+            date_str = date
+        pdf_url = link_pdf or f"https://arxiv.org/pdf/{eid}.pdf"
+        primary_cat = primary.get("term", category) if primary is not None else category
+        rows.append((eid, title, pdf_url, date_str, primary_cat, summary))
+    return rows
+
+def fetch_and_store(categories=None, papers_per_tag=None, date=None):
+    """
+    Fetch papers from arXiv and store in DB.
+    If date is provided (YYYY-MM-DD), only papers submitted on that day (GMT) are fetched
+    via direct API HTTP call (reliable date filter). Otherwise uses arxiv library for latest papers.
+    """
     categories = categories or CATEGORIES
     papers_per_tag = papers_per_tag if papers_per_tag is not None else PAPERS_PER_TAG
-    client = arxiv.Client()
     conn = sqlite3.connect(DB_PATH)
     total_found = 0
     new_added = 0
-    for cat in categories:
-        print(f"Finding papers in category: {cat}")
-        search = arxiv.Search(
-            query=f"cat:{cat}",
-            max_results=papers_per_tag,
-            sort_by=arxiv.SortCriterion.SubmittedDate
-        )
-        for result in client.results(search):
-            total_found += 1
+    if date:
+        # Date-filtered fetch: use direct HTTP so the query is sent exactly as arXiv expects
+        for cat in categories:
+            print(f"Finding papers in category: {cat} for date {date}")
             try:
-                conn.execute("INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?)",
-                             (result.entry_id, result.title, result.pdf_url,
-                              result.published.strftime("%Y-%m-%d"),
-                              result.primary_category, result.summary))
-                new_added += 1
-            except sqlite3.IntegrityError:
-                pass
+                rows = _fetch_by_date_http(cat, papers_per_tag, date)
+                for row in rows:
+                    total_found += 1
+                    try:
+                        conn.execute(
+                            "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?)",
+                            (row[0], row[1], row[2], row[3], row[4], row[5]),
+                        )
+                        new_added += 1
+                    except sqlite3.IntegrityError:
+                        pass
+            except requests.RequestException as e:
+                print(f"  Request failed for {cat}: {e}")
+    else:
+        # No date: use arxiv library (newest papers)
+        client = arxiv.Client()
+        for cat in categories:
+            print(f"Finding papers in category: {cat}")
+            search = arxiv.Search(
+                query=f"cat:{cat}",
+                max_results=papers_per_tag,
+                sort_by=arxiv.SortCriterion.SubmittedDate,
+            )
+            for result in client.results(search):
+                total_found += 1
+                try:
+                    conn.execute(
+                        "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            result.entry_id,
+                            result.title,
+                            result.pdf_url,
+                            result.published.strftime("%Y-%m-%d"),
+                            result.primary_category,
+                            result.summary,
+                        ),
+                    )
+                    new_added += 1
+                except sqlite3.IntegrityError:
+                    pass
     conn.commit()
     conn.close()
     print(f"\n>> FETCH COMPLETE: Found {total_found} total papers.")
@@ -272,7 +355,7 @@ if __name__ == "__main__":
     view_date = args.date or datetime.now().strftime("%Y-%m-%d")
     init_db()
     cats = [c.strip() for c in args.categories.split(",")] if args.categories else None
-    fetch_and_store(categories=cats, papers_per_tag=args.papers_per_tag)
+    fetch_and_store(categories=cats, papers_per_tag=args.papers_per_tag, date=view_date)
     if not args.fetch_only:
         generate_html(limit=args.limit, date=view_date)
         generate_podcast_and_synopsis(style=args.style, length=args.length, custom_style=args.custom_style, date=view_date)
