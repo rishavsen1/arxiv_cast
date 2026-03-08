@@ -1,0 +1,14 @@
+[Unit]
+Description=Raspberry Pi Health Dashboard
+After=network.target
+
+[Service]
+User=rishav
+WorkingDirectory=/home/rishav/weblogger
+# Use project venv so Flask + arxiv/openai/edge_tts are available
+ExecStart=/home/rishav/weblogger/.venv/bin/python /home/rishav/weblogger/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

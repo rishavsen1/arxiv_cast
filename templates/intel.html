@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ArxivCast // Intelligence Briefing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+        .content-card { background: #1e293b; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .intel-scroll { height: 75vh; overflow-y: auto; padding-right: 15px; }
+        .intel-scroll::-webkit-scrollbar { width: 6px; }
+        .intel-scroll::-webkit-scrollbar-track { background: #1e293b; }
+        .intel-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+        a { color: #38bdf8; text-decoration: none; font-weight: 600; }
+        a:hover { color: #7dd3fc; }
+        .tag-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
+        .tag-cs-LG { background: #38bdf8; color: #0c4a6e; }
+        .tag-cs-AI { background: #818cf8; color: #1e1b4b; }
+        .tag-cs-RO { background: #f472b6; color: #500724; }
+        .tag-cs-SY, .tag-eess-SY { background: #fbbf24; color: #451a03; }
+        .tag-math-OC { background: #34d399; color: #064e3b; }
+        .tag-stat-ML { background: #a78bfa; color: #2e1065; }
+        .tag-cs-NE { background: #6ee7b7; color: #064e3b; }
+        .tag-cs-CE { background: #93c5fd; color: #1e3a8a; }
+        .tag-eess-SP { background: #c084fc; color: #4c1d95; }
+        .tag-econ-EM { background: #fb7185; color: #4c0519; }
+        .tag-physics-soc-ph { background: #94a3b8; color: #0f172a; }
+        .tag-default { background: #475569; color: #f8fafc; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { width: 20px; height: 20px; border: 2px solid #334155; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-none mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-semibold tracking-tight">ArxivCast — Intelligence Briefing</h1>
+            <a href="/" class="text-xs bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg border border-slate-700 transition">Return to Dashboard</a>
+        </div>
+
+        <div class="flex gap-6 mb-6 border-b border-slate-800">
+            <button onclick="switchTab('matrix')" id="btn-matrix" class="pb-3 text-xs font-bold uppercase tracking-widest text-sky-400 border-b-2 border-sky-400 transition-all">Data Matrix</button>
+            <button onclick="switchTab('ai')" id="btn-ai" class="pb-3 text-xs font-bold uppercase tracking-widest text-slate-500 border-b-2 border-transparent hover:text-slate-300 transition-all">AI Summary & Audio</button>
+        </div>
+
+        <!-- DATA MATRIX: categories first, then fetch, then table (on-demand) -->
+        <div id="view-matrix" class="block">
+            <div class="mb-4 p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
+                <span class="text-[10px] text-slate-500 uppercase font-bold block mb-3">1. Choose categories & date (on-demand)</span>
+                <div class="flex flex-wrap items-end gap-4">
+                    <div>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Categories</label>
+                        <select id="arxiv-categories" multiple class="w-64 min-h-[80px] bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                        </select>
+                        <p class="text-[10px] text-slate-500 mt-1">Empty = all. Ctrl/Cmd to multi-select.</p>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Date of papers</label>
+                        <input type="date" id="arxiv-date" class="bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Papers per tag</label>
+                        <input type="number" id="arxiv-papers-per-tag" min="1" max="50" value="5" class="w-20 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">&nbsp;</label>
+                        <button type="button" id="arxiv-fetch-btn" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2">
+                            <span id="arxiv-fetch-spinner" class="spinner hidden"></span>
+                            <span id="arxiv-fetch-label">Search & Populate</span>
+                        </button>
+                    </div>
+                </div>
+                <p id="arxiv-fetch-status" class="text-xs text-slate-500 mt-2 hidden"></p>
+            </div>
+            <div class="mb-6 flex flex-wrap gap-3 p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
+                <span class="text-[10px] text-slate-500 uppercase font-bold w-full mb-1">Color legend</span>
+                <span class="tag-pill tag-cs-LG">cs.LG</span>
+                <span class="tag-pill tag-cs-AI">cs.AI</span>
+                <span class="tag-pill tag-cs-RO">cs.RO</span>
+                <span class="tag-pill tag-cs-SY">cs.SY</span>
+                <span class="tag-pill tag-math-OC">math.OC</span>
+                <span class="tag-pill tag-stat-ML">stat.ML</span>
+                <span class="tag-pill tag-cs-NE">cs.NE</span>
+                <span class="tag-pill tag-cs-CE">cs.CE</span>
+                <span class="tag-pill tag-eess-SP">eess.SP</span>
+                <span class="tag-pill tag-econ-EM">econ.EM</span>
+                <span class="tag-pill tag-physics-soc-ph">physics.soc-ph</span>
+            </div>
+            <div class="content-card overflow-hidden">
+                <div class="intel-scroll" style="height: 70vh;" id="matrix-container">
+                    <p class="text-slate-500 text-sm p-6">Choose categories and date above, then click <strong>Search & Populate</strong> to fetch and show papers.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI: options + on-demand synopsis & audio -->
+        <div id="view-ai" class="hidden">
+            <div class="content-card p-8 min-h-[70vh] flex flex-col md:flex-row gap-8">
+                <div class="w-full md:w-1/3">
+                    <div class="sticky top-8 p-6 bg-slate-900 border border-slate-700 rounded-xl shadow-lg">
+                        <h2 class="text-sky-400 font-bold text-lg mb-1 flex items-center gap-2">
+                            <span class="animate-pulse text-rose-500">●</span> ArxivCast
+                        </h2>
+                        <p class="text-[10px] text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-4">AI two-host dialogue</p>
+                        <div class="mb-4">
+                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Date for podcast</label>
+                            <input type="date" id="podcast-date" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 mb-2">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Style</label>
+                            <select id="podcast-style" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 mb-2">
+                                <option value="easy">Easy to Understand</option>
+                                <option value="deep">DeepDive</option>
+                                <option value="brief">Brief</option>
+                                <option value="critique">Critique</option>
+                                <option value="debate">Debate</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                            <div id="podcast-custom-wrap" class="hidden">
+                                <label class="block text-[10px] text-slate-500 uppercase mb-1">Custom style</label>
+                                <textarea id="podcast-custom-style" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2" placeholder="e.g. Focus on reproducibility"></textarea>
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Length</label>
+                            <select id="podcast-length" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
+                                <option value="short">Short (~1–2 min)</option>
+                                <option value="medium" selected>Medium (~3–5 min)</option>
+                                <option value="long">Long (~6–10 min)</option>
+                            </select>
+                        </div>
+                        <button type="button" id="podcast-generate-btn" class="w-full mb-4 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-lg transition flex items-center justify-center gap-2">
+                            <span id="podcast-spinner" class="spinner hidden"></span>
+                            <span id="podcast-btn-label">Generate podcast</span>
+                        </button>
+                        <p id="podcast-status" class="text-xs text-slate-500 mb-4 hidden"></p>
+                        <audio id="podcast-player" controls class="w-full h-10 rounded-full" style="filter: invert(0.9) hue-rotate(180deg);">
+                            <source src="{{ url_for('static', filename='audio/daily_briefing.mp3') }}" type="audio/mpeg">
+                            Your browser does not support the audio element.
+                        </audio>
+                        <div class="mt-8 border-t border-slate-800 pt-6">
+                            <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2"><span>☁️</span> GDrive Vault</h3>
+                            <div id="archive-list" class="space-y-2 max-h-48 overflow-y-auto pr-2">
+                                <p class="text-xs text-slate-600 italic">Loading…</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="w-full md:w-2/3 md:border-l md:border-slate-800 md:pl-8">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-6">Transcript & Synopsis</h3>
+                    <div id="synopsis-container">
+                        <p class="text-slate-500 text-sm">Generate a podcast to see the transcript here.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            var matrixView = document.getElementById('view-matrix');
+            var aiView = document.getElementById('view-ai');
+            var matrixBtn = document.getElementById('btn-matrix');
+            var aiBtn = document.getElementById('btn-ai');
+            if (tab === 'matrix') {
+                matrixView.classList.remove('hidden');
+                aiView.classList.add('hidden');
+                matrixBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-sky-400 border-b-2 border-sky-400 transition-all";
+                aiBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-slate-500 border-b-2 border-transparent hover:text-slate-300 transition-all";
+            } else {
+                matrixView.classList.add('hidden');
+                aiView.classList.remove('hidden');
+                aiBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-sky-400 border-b-2 border-sky-400 transition-all";
+                matrixBtn.className = "pb-3 text-xs font-bold uppercase tracking-widest text-slate-500 border-b-2 border-transparent hover:text-slate-300 transition-all";
+                loadSynopsis();
+            }
+        }
+
+        // Default date to today
+        var today = new Date().toISOString().slice(0, 10);
+        document.getElementById('arxiv-date').value = today;
+        document.getElementById('podcast-date').value = today;
+
+        // Load categories from intel-stack (provided by arxiv_intel.CATEGORIES)
+        fetch('/api/arxiv/categories')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var sel = document.getElementById('arxiv-categories');
+                (data.categories || []).forEach(function(cat) {
+                    var opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.textContent = cat;
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(function() {});
+
+        function loadMatrixHtml() {
+            fetch('/api/arxiv/matrix-html')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    document.getElementById('matrix-container').innerHTML = html;
+                })
+                .catch(function() {
+                    document.getElementById('matrix-container').innerHTML = '<p class="text-red-500 p-6">Could not load matrix.</p>';
+                });
+        }
+
+        function loadSynopsis() {
+            fetch('/api/arxiv/synopsis-html')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    document.getElementById('synopsis-container').innerHTML = html;
+                })
+                .catch(function() {
+                    document.getElementById('synopsis-container').innerHTML = '<p class="text-red-500">Could not load transcript.</p>';
+                });
+        }
+
+        document.getElementById('arxiv-fetch-btn').addEventListener('click', function() {
+            var sel = document.getElementById('arxiv-categories');
+            var papersPerTag = parseInt(document.getElementById('arxiv-papers-per-tag').value, 10) || 5;
+            var date = document.getElementById('arxiv-date').value || today;
+            var categories = Array.from(sel.selectedOptions).map(function(o) { return o.value; });
+            var status = document.getElementById('arxiv-fetch-status');
+            var btn = document.getElementById('arxiv-fetch-btn');
+            var spinner = document.getElementById('arxiv-fetch-spinner');
+            var label = document.getElementById('arxiv-fetch-label');
+            status.classList.remove('hidden');
+            status.textContent = 'Fetching from arXiv…';
+            status.className = 'text-xs text-slate-400 mt-2';
+            spinner.classList.remove('hidden');
+            label.textContent = 'Fetching…';
+            btn.disabled = true;
+            fetch('/api/arxiv/fetch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    categories: categories.length ? categories : null,
+                    papers_per_tag: papersPerTag,
+                    date: date,
+                    limit: 120
+                })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                spinner.classList.add('hidden');
+                label.textContent = 'Search & Populate';
+                btn.disabled = false;
+                if (data.ok) {
+                    status.textContent = 'Added ' + (data.new_added || 0) + ' new papers. Loading table…';
+                    status.className = 'text-xs text-green-400 mt-2';
+                    loadMatrixHtml();
+                } else {
+                    status.textContent = 'Error: ' + (data.error || 'Unknown');
+                    status.className = 'text-xs text-red-400 mt-2';
+                }
+            })
+            .catch(function(err) {
+                spinner.classList.add('hidden');
+                label.textContent = 'Search & Populate';
+                btn.disabled = false;
+                status.textContent = 'Error: ' + err.message;
+                status.className = 'text-xs text-red-400 mt-2';
+            });
+        });
+
+        document.getElementById('podcast-style').addEventListener('change', function() {
+            document.getElementById('podcast-custom-wrap').classList.toggle('hidden', this.value !== 'custom');
+        });
+
+        document.getElementById('podcast-generate-btn').addEventListener('click', function() {
+            var style = document.getElementById('podcast-style').value;
+            var length = document.getElementById('podcast-length').value;
+            var date = document.getElementById('podcast-date').value || null;
+            var customStyle = style === 'custom' ? document.getElementById('podcast-custom-style').value : null;
+            var status = document.getElementById('podcast-status');
+            var btn = document.getElementById('podcast-generate-btn');
+            var spinner = document.getElementById('podcast-spinner');
+            var btnLabel = document.getElementById('podcast-btn-label');
+            status.classList.remove('hidden');
+            status.textContent = 'Generating (this may take a minute)…';
+            status.className = 'text-xs text-amber-400 mb-4';
+            spinner.classList.remove('hidden');
+            btnLabel.textContent = 'Generating…';
+            btn.disabled = true;
+            fetch('/api/arxiv/podcast', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ style: style, length: length, custom_style: customStyle, date: date })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                spinner.classList.add('hidden');
+                btnLabel.textContent = 'Generate podcast';
+                btn.disabled = false;
+                if (data.ok) {
+                    status.textContent = 'Done.';
+                    status.className = 'text-xs text-green-400 mb-4';
+                    loadSynopsis();
+                    document.getElementById('podcast-player').load();
+                } else {
+                    status.textContent = 'Error: ' + (data.error || 'Unknown');
+                    status.className = 'text-xs text-red-400 mb-4';
+                }
+            })
+            .catch(function(err) {
+                spinner.classList.add('hidden');
+                btnLabel.textContent = 'Generate podcast';
+                btn.disabled = false;
+                status.textContent = 'Error: ' + err.message;
+                status.className = 'text-xs text-red-400 mb-4';
+            });
+        });
+
+        fetch('/api/archive')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var container = document.getElementById('archive-list');
+                if (data.length === 0) {
+                    container.innerHTML = '<p class="text-xs text-slate-600">No archives yet.</p>';
+                    return;
+                }
+                container.innerHTML = data.map(function(filename) {
+                    return '<button onclick="playArchive(\'' + filename + '\')" class="w-full text-left p-3 rounded-lg bg-slate-800/50 border border-slate-700 hover:bg-slate-700 hover:border-sky-500 transition-all group flex justify-between items-center">' +
+                        '<span class="text-xs font-semibold text-slate-300 group-hover:text-sky-400">' + filename.replace('.mp3', '') + '</span>' +
+                        '<span class="text-[10px] text-slate-500 uppercase">Play ▶</span></button>';
+                }).join('');
+            })
+            .catch(function() {
+                document.getElementById('archive-list').innerHTML = '<p class="text-xs text-red-500">Could not load archive.</p>';
+            });
+
+        function playArchive(filename) {
+            var player = document.getElementById('podcast-player');
+            player.src = '/static/archive/' + filename;
+            player.play();
+        }
+    </script>
+</body>
+</html>

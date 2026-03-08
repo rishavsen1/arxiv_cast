@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PI-NODE // TERMINAL</title>
+    <link rel="icon" href="https://fav.farm/📟">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            background-color: #050505; 
+            color: #00ff41; 
+            font-family: 'Fira Code', monospace;
+            background-image: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            height: 100vh;
+            overflow-x: hidden;
+        }
+        .neo-card { 
+            background: rgba(0, 20, 0, 0.8);
+            border: 1px solid #00ff41;
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+            position: relative;
+        }
+        .neo-card:hover { border-color: #00ff41; box-shadow: 0 0 15px rgba(0, 255, 65, 0.4); }
+        .glitch-text { text-shadow: 2px 0 #ff00ff, -2px 0 #00ffff; }
+        /* Fixed height container to prevent vertical growth */
+        .chart-container { position: relative; height: 300px; width: 100%; }
+    </style>
+</head>
+<body class="p-4 md:p-10">
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8 border-b border-green-900 pb-6 flex justify-between items-end">
+            <div>
+                <h1 class="text-2xl font-bold uppercase tracking-[0.3em] glitch-text">System-Node: Raspberry-Pi</h1>
+                <p class="text-green-700 text-xs mt-1 font-bold"> >> DECENTRALIZED_NETWORK_ACTIVE</p>
+            </div>
+            <div class="text-right text-[10px] text-green-800">
+                LOC: 127.0.0.1 <br> AUTH: RISHAV_ROOT
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div class="neo-card p-6">
+                <span class="text-[10px] uppercase block mb-2 border-b border-green-900 pb-1">01_CPU_LOAD</span>
+                <div id="cpu-val" class="text-4xl font-bold">--%</div>
+            </div>
+            <div class="neo-card p-6">
+                <span class="text-[10px] uppercase block mb-2 border-b border-green-900 pb-1">02_MEM_ALLOC</span>
+                <div id="ram-val" class="text-4xl font-bold">--%</div>
+            </div>
+            <div class="neo-card p-6">
+                <span class="text-[10px] uppercase block mb-2 border-b border-green-900 pb-1">03_THERMALS</span>
+                <div id="temp-val" class="text-4xl font-bold">--°C</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <a href="https://raspberrypi.tailb18ceb.ts.net" target="_blank" class="neo-card p-6 group transition-all">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h4 class="text-lg font-bold group-hover:glitch-text uppercase">[ Vaultwarden ]</h4>
+                        <p class="text-green-900 text-[10px] uppercase">Secure Secret Vault</p>
+                    </div>
+                    <span class="text-2xl">🔐</span>
+                </div>
+            </a>
+            <a href="http://raspberrypi.tailb18ceb.ts.net:8080" target="_blank" class="neo-card p-6 group transition-all">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h4 class="text-lg font-bold group-hover:glitch-text uppercase">[ Komga ]</h4>
+                        <p class="text-green-900 text-[10px] uppercase">Media Archive</p>
+                    </div>
+                    <span class="text-2xl">📚</span>
+                </div>
+            </a>
+		<a href="http://raspberrypi.tailb18ceb.ts.net:8000/admin" target="_blank" class="neo-card p-6 group transition-all">
+		    <div class="flex justify-between items-center">
+			<div>
+			    <h4 class="text-lg font-bold group-hover:glitch-text uppercase">[ Pi-hole ]</h4>
+			    <p class="text-green-900 text-[10px] uppercase">Network-Wide Ad Shield</p>
+			</div>
+			<span class="text-2xl">🕳️</span>
+		    </div>
+		</a>
+		<a href="http://raspberrypi.tailb18ceb.ts.net:3183/admin" target="_blank" class="neo-card p-6 group transition-all">
+		    <div class="flex justify-between items-center">
+			<div>
+			    <h4 class="text-lg font-bold group-hover:glitch-text uppercase">[ Bento PDF ]</h4>
+			    <p class="text-green-900 text-[10px] uppercase">PDF Editor</p>
+			</div>
+			<span class="text-2xl">&#x1F4CB</span>
+		    </div>
+		</a>
+		<a href="/intel" class="neo-card p-6 group transition-all">
+		    <div class="flex justify-between items-center">
+			<div>
+			    <h4 class="text-lg font-bold group-hover:glitch-text uppercase">[ Arxiv Feed ]</h4>
+			    <p class="text-green-900 text-[10px] uppercase">ARXIV_RSS_STREAM</p>
+			</div>
+			<span class="text-2xl">&#x1F4D6</span>
+		    </div>
+		</a>
+        </div>
+
+        <div class="neo-card p-6">
+            <span class="text-[10px] uppercase block mb-4 border-b border-green-900 pb-1">Waveform_Telemetry</span>
+            <div class="chart-container">
+                <canvas id="healthChart"></canvas>
+            </div>
+        </div>
+
+        <div class="mt-4 text-[10px] text-green-800 italic">
+            >> <span id="log-text">SYSTEM_READY...</span>
+        </div>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('healthChart').getContext('2d');
+        const MAX_POINTS = 40;
+        
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(MAX_POINTS).fill(''),
+                datasets: [
+                    { label: 'CPU', borderColor: '#00ff41', borderWidth: 2, data: Array(MAX_POINTS).fill(0), tension: 0.2, pointRadius: 0, fill: false },
+                    { label: 'RAM', borderColor: '#ffb000', borderWidth: 2, data: Array(MAX_POINTS).fill(0), tension: 0.2, pointRadius: 0, fill: false },
+                    { label: 'TEMP', borderColor: '#ff00ff', borderWidth: 1, data: Array(MAX_POINTS).fill(0), tension: 0.2, pointRadius: 0, fill: false }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false, // Critical: Stops CPU spikes from heavy animations
+                scales: { 
+                    y: { min: 0, max: 100, grid: { color: '#002200' }, ticks: { color: '#006600', font: { family: 'Fira Code', size: 9 } } },
+                    x: { display: false }
+                },
+                plugins: { 
+                    legend: { display: true, position: 'bottom', labels: { color: '#00ff41', font: { family: 'Fira Code', size: 10 }, boxWidth: 10 } } 
+                }
+            }
+        });
+
+	// Inside your <script> tag, update the updateStats function:
+
+	async function updateStats() {
+	    try {
+		const res = await fetch('/api/stats');
+		const data = await res.json();
+		
+		// Update big text
+		document.getElementById('cpu-val').innerText = data.current.cpu + '%';
+		document.getElementById('ram-val').innerText = data.current.ram + '%';
+		document.getElementById('temp-val').innerText = data.current.temp + '°C';
+
+		// Clear the chart and repopulate with the history from the PI
+		chart.data.datasets[0].data = data.history.map(h => h.cpu);
+		chart.data.datasets[1].data = data.history.map(h => h.ram);
+		chart.data.datasets[2].data = data.history.map(h => h.temp);
+
+		// Ensure the chart doesn't shift weirdly by matching labels to history length
+		chart.data.labels = data.history.map(() => '');
+
+		chart.update('none'); 
+	    } catch (e) { 
+		document.getElementById('log-text').innerText = "SIGNAL_LOST_RECONNECTING..."; 
+	    }
+	}
+
+        const logs = ["MONITORING_PORTS...", "SECURE_TUNNEL_ACTIVE...", "BACKUP_SYNC_READY...", "VAULT_LOCKED..."];
+        setInterval(() => {
+            document.getElementById('log-text').innerText = logs[Math.floor(Math.random() * logs.length)];
+        }, 5000);
+
+        setInterval(updateStats, 2000);
+        updateStats();
+    </script>
+</body>
+</html>
