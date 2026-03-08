@@ -26,11 +26,17 @@ DB_PATH = str(_INTEL_STACK_DIR / "arxiv_history.db")
 # Generated HTML lives in intel-stack; served on demand by the app.
 OUTPUT_HTML = str(_INTEL_STACK_DIR / "arxiv_intel.html")
 SYNOPSIS_OUTPUT = str(_INTEL_STACK_DIR / "arxiv_synopsis.html")
-# Categories are defined here (intel-stack is the source of truth); /api/arxiv/categories reads this.
-CATEGORIES = [
-    "cs.LG", "cs.AI", "cs.SY", "cs.RO", "cs.NE", "cs.CE",
-    "eess.SY", "eess.SP", "math.OC", "stat.ML", "econ.EM", "physics.soc-ph"
-]
+# Two-layer categories (arXiv style): layer1 = archive/topic, layer2 = subject → full id is "layer1.layer2"
+# /api/arxiv/categories returns both tree and flat list.
+CATEGORIES_TREE = {
+    "cs": ["AI", "LG", "SY", "RO", "NE", "CE"],
+    "eess": ["SY", "SP"],
+    "math": ["OC"],
+    "stat": ["ML"],
+    "econ": ["EM"],
+    "physics": ["soc-ph"],
+}
+CATEGORIES = [f"{l1}.{l2}" for l1, subs in CATEGORIES_TREE.items() for l2 in subs]
 PAPERS_PER_TAG = 5
 
 # --- AI CONFIGURATION (key from .env only; never commit .env) ---

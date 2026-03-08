@@ -49,10 +49,11 @@
                 <span class="text-[10px] text-slate-500 uppercase font-bold block mb-3">1. Choose categories & date (on-demand)</span>
                 <div class="flex flex-wrap items-end gap-4">
                     <div>
-                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Categories</label>
-                        <select id="arxiv-categories" multiple class="w-64 min-h-[80px] bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2">
-                        </select>
-                        <p class="text-[10px] text-slate-500 mt-1">Empty = all. Ctrl/Cmd to multi-select.</p>
+                        <label class="block text-[10px] text-slate-500 uppercase mb-1">Categories (arXiv-style: topic → subject)</label>
+                        <div id="arxiv-categories-wrap" class="w-64 max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 space-y-2">
+                            <!-- Filled by JS from /api/arxiv/categories tree -->
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">Empty = all. Check subjects under each topic.</p>
                     </div>
                     <div>
                         <label class="block text-[10px] text-slate-500 uppercase mb-1">Date</label>
@@ -195,27 +196,47 @@
             loadMatrixHtml();
         });
         arxivDateEl.addEventListener('change', loadMatrixHtml);
-        document.getElementById('arxiv-categories').addEventListener('change', loadMatrixHtml);
+        document.getElementById('arxiv-categories-wrap').addEventListener('change', function(ev) {
+            if (ev.target && ev.target.name === 'arxiv-category') loadMatrixHtml();
+        });
         document.getElementById('arxiv-papers-per-tag').addEventListener('change', loadMatrixHtml);
 
-        // Load categories from intel-stack (provided by arxiv_intel.CATEGORIES)
+        // Load two-layer categories (topic → subject) from intel-stack
         fetch('/api/arxiv/categories')
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                var sel = document.getElementById('arxiv-categories');
-                (data.categories || []).forEach(function(cat) {
-                    var opt = document.createElement('option');
-                    opt.value = cat;
-                    opt.textContent = cat;
-                    sel.appendChild(opt);
+                var wrap = document.getElementById('arxiv-categories-wrap');
+                wrap.innerHTML = '';
+                var tree = data.tree || {};
+                Object.keys(tree).sort().forEach(function(layer1) {
+                    var group = document.createElement('div');
+                    group.className = 'category-group';
+                    var label = document.createElement('div');
+                    label.className = 'text-sky-400 font-semibold text-xs uppercase tracking-wider mb-1';
+                    label.textContent = layer1;
+                    group.appendChild(label);
+                    var subs = tree[layer1] || [];
+                    subs.forEach(function(layer2) {
+                        var full = layer1 + '.' + layer2;
+                        var lbl = document.createElement('label');
+                        lbl.className = 'flex items-center gap-2 py-0.5 cursor-pointer hover:text-slate-100';
+                        var cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.name = 'arxiv-category';
+                        cb.value = full;
+                        cb.className = 'rounded border-slate-600 bg-slate-700 text-sky-500 focus:ring-sky-500';
+                        lbl.appendChild(cb);
+                        lbl.appendChild(document.createTextNode(layer2));
+                        group.appendChild(lbl);
+                    });
+                    wrap.appendChild(group);
                 });
                 loadMatrixHtml();
             })
             .catch(function() { loadMatrixHtml(); });
 
         function loadMatrixHtml() {
-            var sel = document.getElementById('arxiv-categories');
-            var categories = Array.from(sel.selectedOptions).map(function(o) { return o.value; });
+            var categories = Array.from(document.querySelectorAll('#arxiv-categories-wrap input[name=arxiv-category]:checked')).map(function(cb) { return cb.value; });
             var useDate = document.getElementById('arxiv-use-date').checked;
             var date = useDate ? (document.getElementById('arxiv-date').value || today) : 'latest';
             var papersPerTag = parseInt(document.getElementById('arxiv-papers-per-tag').value, 10) || 5;
@@ -246,11 +267,10 @@
         }
 
         document.getElementById('arxiv-fetch-btn').addEventListener('click', function() {
-            var sel = document.getElementById('arxiv-categories');
+            var categories = Array.from(document.querySelectorAll('#arxiv-categories-wrap input[name=arxiv-category]:checked')).map(function(cb) { return cb.value; });
             var papersPerTag = parseInt(document.getElementById('arxiv-papers-per-tag').value, 10) || 5;
             var useDate = document.getElementById('arxiv-use-date').checked;
             var date = useDate ? (document.getElementById('arxiv-date').value || today) : null;
-            var categories = Array.from(sel.selectedOptions).map(function(o) { return o.value; });
             var status = document.getElementById('arxiv-fetch-status');
             var btn = document.getElementById('arxiv-fetch-btn');
             var spinner = document.getElementById('arxiv-fetch-spinner');

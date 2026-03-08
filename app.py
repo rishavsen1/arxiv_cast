@@ -155,12 +155,15 @@ def arxiv_podcast():
 def arxiv_categories():
     try:
         mod = _arxiv_intel()
-        return jsonify({"categories": mod.CATEGORIES})
+        return jsonify({"categories": mod.CATEGORIES, "tree": getattr(mod, "CATEGORIES_TREE", None)})
     except Exception:
-        return jsonify({"categories": [
-            "cs.LG", "cs.AI", "cs.SY", "cs.RO", "cs.NE", "cs.CE",
-            "eess.SY", "eess.SP", "math.OC", "stat.ML", "econ.EM", "physics.soc-ph"
-        ]})
+        return jsonify({
+            "categories": [
+                "cs.LG", "cs.AI", "cs.SY", "cs.RO", "cs.NE", "cs.CE",
+                "eess.SY", "eess.SP", "math.OC", "stat.ML", "econ.EM", "physics.soc-ph"
+            ],
+            "tree": {"cs": ["AI", "LG", "SY", "RO", "NE", "CE"], "eess": ["SY", "SP"], "math": ["OC"], "stat": ["ML"], "econ": ["EM"], "physics": ["soc-ph"]}
+        })
 
 if __name__ == '__main__':
     if not os.path.exists('templates'):
