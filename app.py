@@ -62,9 +62,31 @@ def get_archive():
     filenames.sort(reverse=True)
     return jsonify(filenames)
 
-# ArxivCast: serve generated matrix HTML from intel-stack (on-demand)
+# ArxivCast: serve generated matrix HTML (filtered by categories, date, papers_per_tag when provided)
 @app.route('/api/arxiv/matrix-html')
 def arxiv_matrix_html():
+    categories_param = request.args.get("categories")
+    date_param = request.args.get("date")
+    papers_per_tag_param = request.args.get("papers_per_tag")
+    categories = None
+    if categories_param:
+        categories = [c.strip() for c in categories_param.split(",") if c.strip()]
+    date = None if not date_param or date_param == "latest" else date_param
+    papers_per_tag = None
+    if papers_per_tag_param:
+        try:
+            papers_per_tag = int(papers_per_tag_param)
+            if papers_per_tag < 1:
+                papers_per_tag = None
+        except ValueError:
+            pass
+    if categories is not None or date is not None or papers_per_tag is not None:
+        try:
+            mod = _arxiv_intel()
+            html = mod.get_matrix_html(limit=120, date=date, categories=categories, papers_per_tag=papers_per_tag)
+            return Response(html, mimetype="text/html; charset=utf-8")
+        except Exception:
+            pass
     path = os.path.join(INTEL_STACK_DIR, "arxiv_intel.html")
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -108,7 +130,7 @@ def arxiv_fetch():
         mod = _arxiv_intel()
         mod.init_db()
         result = mod.fetch_and_store(categories=categories, papers_per_tag=papers_per_tag, date=date)
-        mod.generate_html(limit=limit, date=date)
+        mod.generate_html(limit=limit, date=date, papers_per_tag=papers_per_tag)
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

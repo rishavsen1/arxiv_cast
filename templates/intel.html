@@ -192,7 +192,11 @@
         arxivUseDateCheck.addEventListener('change', function() {
             arxivDateWrap.classList.toggle('hidden', !this.checked);
             if (this.checked && !arxivDateEl.value) arxivDateEl.value = today;
+            loadMatrixHtml();
         });
+        arxivDateEl.addEventListener('change', loadMatrixHtml);
+        document.getElementById('arxiv-categories').addEventListener('change', loadMatrixHtml);
+        document.getElementById('arxiv-papers-per-tag').addEventListener('change', loadMatrixHtml);
 
         // Load categories from intel-stack (provided by arxiv_intel.CATEGORIES)
         fetch('/api/arxiv/categories')
@@ -205,11 +209,22 @@
                     opt.textContent = cat;
                     sel.appendChild(opt);
                 });
+                loadMatrixHtml();
             })
-            .catch(function() {});
+            .catch(function() { loadMatrixHtml(); });
 
         function loadMatrixHtml() {
-            fetch('/api/arxiv/matrix-html')
+            var sel = document.getElementById('arxiv-categories');
+            var categories = Array.from(sel.selectedOptions).map(function(o) { return o.value; });
+            var useDate = document.getElementById('arxiv-use-date').checked;
+            var date = useDate ? (document.getElementById('arxiv-date').value || today) : 'latest';
+            var papersPerTag = parseInt(document.getElementById('arxiv-papers-per-tag').value, 10) || 5;
+            var params = new URLSearchParams();
+            if (categories.length) params.set('categories', categories.join(','));
+            params.set('date', date);
+            params.set('papers_per_tag', String(papersPerTag));
+            var url = '/api/arxiv/matrix-html?' + params.toString();
+            fetch(url)
                 .then(function(r) { return r.text(); })
                 .then(function(html) {
                     document.getElementById('matrix-container').innerHTML = html;
@@ -295,7 +310,7 @@
             var spinner = document.getElementById('podcast-spinner');
             var btnLabel = document.getElementById('podcast-btn-label');
             status.classList.remove('hidden');
-            status.textContent = 'Generating (this may take a minute)…';
+            status.textContent = 'Generating (this may take a few minutes)…';
             status.className = 'text-xs text-amber-400 mb-4';
             spinner.classList.remove('hidden');
             btnLabel.textContent = 'Generating…';
