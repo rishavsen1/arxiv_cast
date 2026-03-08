@@ -112,15 +112,10 @@
                         </h2>
                         <p class="text-[10px] text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-800 pb-4">AI two-host dialogue</p>
                         <div class="mb-4">
-                            <label class="block text-[10px] text-slate-500 uppercase mb-1">Date for podcast</label>
-                            <input type="date" id="podcast-date" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 mb-2">
-                        </div>
-                        <div class="mb-4">
                             <label class="block text-[10px] text-slate-500 uppercase mb-1">Style</label>
                             <select id="podcast-style" class="w-full bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 mb-2">
                                 <option value="easy">Easy to Understand</option>
                                 <option value="deep">DeepDive</option>
-                                <option value="brief">Brief</option>
                                 <option value="critique">Critique</option>
                                 <option value="debate">Debate</option>
                                 <option value="custom">Custom</option>
@@ -198,9 +193,6 @@
             arxivDateWrap.classList.toggle('hidden', !this.checked);
             if (this.checked && !arxivDateEl.value) arxivDateEl.value = today;
         });
-        var podcastDateEl = document.getElementById('podcast-date');
-        podcastDateEl.setAttribute('max', today);
-        podcastDateEl.value = today;
 
         // Load categories from intel-stack (provided by arxiv_intel.CATEGORIES)
         fetch('/api/arxiv/categories')
@@ -291,11 +283,13 @@
             document.getElementById('podcast-custom-wrap').classList.toggle('hidden', this.value !== 'custom');
         });
 
-        document.getElementById('podcast-generate-btn').addEventListener('click', function() {
+        function doGeneratePodcast() {
             var style = document.getElementById('podcast-style').value;
             var length = document.getElementById('podcast-length').value;
-            var date = document.getElementById('podcast-date').value || null;
             var customStyle = style === 'custom' ? document.getElementById('podcast-custom-style').value : null;
+            // Use same date as matrix: specific date if "Use specific date" is on, else latest
+            var useDate = document.getElementById('arxiv-use-date').checked;
+            var date = useDate ? (document.getElementById('arxiv-date').value || today) : null;
             var status = document.getElementById('podcast-status');
             var btn = document.getElementById('podcast-generate-btn');
             var spinner = document.getElementById('podcast-spinner');
@@ -333,7 +327,9 @@
                 status.textContent = 'Error: ' + err.message;
                 status.className = 'text-xs text-red-400 mb-4';
             });
-        });
+        }
+
+        document.getElementById('podcast-generate-btn').addEventListener('click', doGeneratePodcast);
 
         fetch('/api/archive')
             .then(function(r) { return r.json(); })

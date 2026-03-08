@@ -226,7 +226,6 @@ def generate_html(limit=120, date=None):
 PODCAST_STYLES = {
     "easy": "Easy to Understand: use plain language, minimal jargon, and simple analogies. Explain concepts as if to a curious non-expert.",
     "deep": "DeepDive: go into technical depth—methods, assumptions, and implications. Suitable for researchers and practitioners.",
-    "brief": "Brief: keep it short. Headlines and one-sentence takeaways only; minimal commentary.",
     "critique": "Critique: take a critical lens. Discuss limitations, trade-offs, and what the work does not address.",
     "debate": "Debate: two hosts take different angles or gently disagree (e.g. one optimistic, one cautious) and bounce ideas off each other.",
 }
