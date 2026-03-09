@@ -45,25 +45,25 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
 
 ## 3. Backend — Flask app (app.py)
 
-- **Routes**:
+- **Routes**: Dashboard routes (`/`, `/api/stats`, `/api/archive`) live in `app.py`. All ArxivCast routes are registered via the **arxvicast** blueprint:
   - `GET /intel`: Serves `intel.html`.
-  - `GET /api/arxiv/categories`: Returns `{ "categories": [...], "tree": { "cs": ["AI","LG",...], ... } }` from the intel-stack module (or fallback list/tree if module fails).
-  - `GET /api/arxiv/matrix-html`: Query params `categories` (comma-separated), `date` (`"latest"` or YYYY-MM-DD), `papers_per_tag` (integer). If any is provided, calls `arxiv_intel.get_matrix_html(..., categories=..., date=..., papers_per_tag=...)` and returns that HTML. Otherwise serves the static file `intel-stack/arxiv_intel.html` if it exists, else a placeholder.
-  - `GET /api/arxiv/synopsis-html`: Serves `intel-stack/arxiv_synopsis.html` if present, else placeholder.
-  - `POST /api/arxiv/clear`: Calls `arxiv_intel.clear_papers()`; returns `{ "ok": true }` or error.
-  - `POST /api/arxiv/fetch`: JSON body: `categories`, `papers_per_tag`, `date`, `limit`. Validates date (no future); calls `arxiv_intel.init_db()`, `fetch_and_store(...)`, `generate_html(..., papers_per_tag=...)`; returns `{ "ok": true, "total_found", "new_added" }` or error.
-  - `POST /api/arxiv/podcast`: JSON body: `style`, `length`, `custom_style`, `date`, `paper_ids` (optional list). Normalizes `paper_ids`; calls `arxiv_intel.generate_podcast_and_synopsis(..., paper_ids=paper_ids)`; returns `{ "ok": true, "result": {...} }` or error.
-  - `GET /api/archive`: Returns JSON list of `.mp3` filenames from `static/archive/` (for the GDrive Vault list; may differ from rclone backup path).
+  - `GET /api/arxiv/categories`: Returns `{ "categories": [...], "tree": { "cs": ["AI","LG",...], ... } }` from `arxvicast.core` (or fallback list/tree if import fails).
+  - `GET /api/arxiv/matrix-html`: Query params `categories`, `date`, `papers_per_tag`. If any is provided, calls `core.get_matrix_html(...)` and returns that HTML. Otherwise serves `arxvicast/data/arxiv_intel.html` if it exists, else a placeholder.
+  - `GET /api/arxiv/synopsis-html`: Serves `arxvicast/data/arxiv_synopsis.html` if present, else placeholder.
+  - `POST /api/arxiv/clear`: Calls `core.clear_papers()`; returns `{ "ok": true }` or error.
+  - `POST /api/arxiv/fetch`: JSON body: `categories`, `papers_per_tag`, `date`, `limit`. Validates date (no future); calls `core.init_db()`, `fetch_and_store(...)`, `generate_html(...)`; returns `{ "ok": true, "total_found", "new_added" }` or error.
+  - `POST /api/arxiv/podcast`: JSON body: `style`, `length`, `custom_style`, `date`, `paper_ids`. Normalizes `paper_ids`; calls `core.generate_podcast_and_synopsis(...)`; returns `{ "ok": true, "result": {...} }` or error.
+  - `GET /api/archive`: Returns JSON list of `.mp3` filenames from `static/archive/` (for the GDrive Vault list).
 
-- **Intel-stack loading**: `_arxiv_intel()` dynamically imports `intel-stack/arxiv_intel.py` and returns the module so all arxiv/DB logic lives in one place.
+- **ArxivCast blueprint**: `app.register_blueprint(arxvicast_bp)` mounts all ArxivCast routes; logic lives in `arxvicast/core.py` and `arxvicast/routes.py`.
 
 ---
 
-## 4. Backend — Intel-stack (intel-stack/arxiv_intel.py)
+## 4. Backend — ArxivCast (arxvicast/core.py)
 
 ### 4.1 Configuration and data model
 
-- **Paths**: `DB_PATH` = `intel-stack/arxiv_history.db`; `OUTPUT_HTML` = `intel-stack/arxiv_intel.html`; `SYNOPSIS_OUTPUT` = `intel-stack/arxiv_synopsis.html`. `.env` in intel-stack is loaded for `OPENROUTER_KEY` etc.
+- **Paths**: `DB_PATH` = `arxvicast/data/arxiv_history.db`; `OUTPUT_HTML` = `arxvicast/data/arxiv_intel.html`; `SYNOPSIS_OUTPUT` = `arxvicast/data/arxiv_synopsis.html`. `.env` in `arxvicast/` is loaded for `OPENROUTER_KEY` etc. Podcast MP3 is written to `static/audio/daily_briefing.mp3` (weblogger app static).
 - **Categories**: Two-layer tree `CATEGORIES_TREE` (e.g. `cs` → [AI, LG, SY, RO, NE, CE]; eess, math, stat, econ, physics). Flat list `CATEGORIES` = all `"layer1.layer2"` (e.g. cs.AI, cs.LG).
 - **PODCAST_STYLES** and **LENGTH_WORDS** define style/length presets for the LLM and TTS.
 - **TTS voices**: Configurable engine. **Default (edge, free)**: Alex = `en-US-AndrewMultilingualNeural`, Sam = `en-US-EmmaMultilingualNeural` for more natural, conversational flow; override with `EDGE_TTS_VOICE_ALEX` / `EDGE_TTS_VOICE_SAM`. **Optional (openai, paid)**: `TTS_ENGINE=openai` and `OPENAI_API_KEY` for ChatGPT-style voices. Audio is TTS-only; script text comes from the LLM, then each segment is synthesized by the chosen engine.
@@ -122,7 +122,7 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
 
 ## 5. Data flow summary
 
-| User action           | Frontend                                      | Backend (Flask → intel-stack)                                                                 | Result |
+| User action           | Frontend                                      | Backend (Flask → arxvicast)                                                                  | Result |
 |-----------------------|-----------------------------------------------|------------------------------------------------------------------------------------------------|--------|
 | Open /intel           | Load categories, load matrix, load synopsis  | GET categories, GET matrix-html (params from UI), GET synopsis-html                          | Page with filters, table, sidebar     |
 | Change filters        | loadMatrixHtml() with new params              | GET matrix-html?categories=&date=&papers_per_tag= → get_matrix_html → _build_matrix_table     | Table HTML updated                   |
@@ -135,7 +135,7 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
 ## 6. External dependencies
 
 - **arXiv**: `https://export.arxiv.org/api/query` (GET with search_query, max_results, sortBy, submittedDate filter for date-specific fetch).
-- **OpenRouter**: LLM for script generation (OPENROUTER_KEY in intel-stack/.env).
+- **OpenRouter**: LLM for script generation (OPENROUTER_KEY in arxvicast/.env).
 - **TTS**: **edge-tts** (default, free) or **OpenAI TTS** when `TTS_ENGINE=openai` and `OPENAI_API_KEY` set; two voices (Alex/Sam); outputs MP3. **Free, more natural Edge voices**: defaults use `en-US-AndrewMultilingualNeural` and `en-US-EmmaMultilingualNeural`; override with `EDGE_TTS_VOICE_ALEX` / `EDGE_TTS_VOICE_SAM` in `.env` (e.g. `en-US-AriaNeural`, `en-US-BrianMultilingualNeural`). **Other free options** (not wired in yet): **Piper** (offline, CPU-friendly, `piper-tts`); **Dia TTS** / **Coqui XTTS** (natural dialogue / voice clone, need GPU or separate server with OpenAI-compatible API); **Nvidia Magpie** via NIM.
 - **pydub**: Concatenate per-segment MP3s into one file (may require ffmpeg on the system).
 - **rclone** (optional): Backup MP3 to Google Drive.
@@ -146,13 +146,14 @@ The page has **no subtabs**: one layout with the matrix as main content and the 
 
 | File | Role |
 |------|------|
-| `app.py` | Flask app; routes for /intel, /api/arxiv/*; loads intel-stack module. |
+| `app.py` | Flask app; dashboard routes; registers arxvicast blueprint. |
 | `templates/intel.html` | Single-page UI: filters, matrix container, sidebar (audio + transcript + archive). |
-| `intel-stack/arxiv_intel.py` | DB init/migration, arXiv fetch (HTTP + library), matrix HTML building, podcast (LLM + transcript + two-voice TTS + rclone). |
-| `intel-stack/arxiv_history.db` | SQLite DB: papers table (id, category, title, url, date, abstract, other_categories). |
-| `intel-stack/arxiv_intel.html` | Static matrix HTML written after a fetch (fallback when matrix-html has no params). |
-| `intel-stack/arxiv_synopsis.html` | Transcript HTML written after podcast generation. |
+| `arxvicast/core.py` | DB init/migration, arXiv fetch (HTTP + library), matrix HTML building, podcast (LLM + transcript + two-voice TTS + rclone). |
+| `arxvicast/routes.py` | Blueprint routes: /intel, /api/arxiv/* (delegate to core). |
+| `arxvicast/data/arxiv_history.db` | SQLite DB: papers table (id, category, title, url, date, abstract, other_categories). |
+| `arxvicast/data/arxiv_intel.html` | Matrix HTML written after a fetch (fallback when matrix-html has no params). |
+| `arxvicast/data/arxiv_synopsis.html` | Transcript HTML written after podcast generation. |
 | `static/audio/daily_briefing.mp3` | Final two-host podcast audio. |
-| `intel-stack/.env` | OPENROUTER_KEY (and any other secrets). |
+| `arxvicast/.env` | OPENROUTER_KEY (and any other secrets). |
 
 This is the exact description of how the arXiv paper viewer and podcast generation are implemented end-to-end, with backend and frontend behavior.
