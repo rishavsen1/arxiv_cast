@@ -1,0 +1,4 @@
+.env
+data/*.db
+data/arxiv_intel.html
+data/arxiv_synopsis.html
