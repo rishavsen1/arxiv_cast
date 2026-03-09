@@ -1,19 +1,38 @@
-import arxiv
-import sqlite3
+"""
+ArxivCast core: arXiv fetch, DB, matrix HTML, podcast (LLM + TTS) and synopsis.
+All paths are under arxvicast/data and the project static/audio folder.
+"""
+
 import os
+import sqlite3
 import tempfile
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
-from openai import OpenAI
+
+import arxiv
 import asyncio
 import edge_tts
-import subprocess
 import requests
+from openai import OpenAI
 from pydub import AudioSegment
+import subprocess
 
-# Load .env from intel-stack directory (safe for cron/cwd)
-_env_path = Path(__file__).resolve().parent / ".env"
+# --- Paths (arxvicast package root = parent of this file) ---
+_ARXIVCAST_ROOT = Path(__file__).resolve().parent
+_DATA_DIR = _ARXIVCAST_ROOT / "data"
+# Project root (weblogger) = parent of arxvicast; podcast MP3 goes to app static
+_WEBLOGGER_ROOT = _ARXIVCAST_ROOT.parent
+AUDIO_OUTPUT = str(_WEBLOGGER_ROOT / "static" / "audio" / "daily_briefing.mp3")
+
+# Expose for routes that serve generated HTML
+DATA_DIR = _DATA_DIR
+OUTPUT_HTML_PATH = _DATA_DIR / "arxiv_intel.html"
+SYNOPSIS_HTML_PATH = _DATA_DIR / "arxiv_synopsis.html"
+
+# Load .env from arxvicast directory
+_env_path = _ARXIVCAST_ROOT / ".env"
 if _env_path.exists():
     with open(_env_path) as f:
         for line in f:
@@ -22,14 +41,12 @@ if _env_path.exists():
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
-# --- CORE CONFIGURATION ---
-_INTEL_STACK_DIR = Path(__file__).resolve().parent
-DB_PATH = str(_INTEL_STACK_DIR / "arxiv_history.db")
-# Generated HTML lives in intel-stack; served on demand by the app.
-OUTPUT_HTML = str(_INTEL_STACK_DIR / "arxiv_intel.html")
-SYNOPSIS_OUTPUT = str(_INTEL_STACK_DIR / "arxiv_synopsis.html")
-# Two-layer categories (arXiv style): layer1 = archive/topic, layer2 = subject → full id is "layer1.layer2"
-# /api/arxiv/categories returns both tree and flat list.
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = str(_DATA_DIR / "arxiv_history.db")
+OUTPUT_HTML = str(OUTPUT_HTML_PATH)
+SYNOPSIS_OUTPUT = str(SYNOPSIS_HTML_PATH)
+
+# Two-layer categories (arXiv style)
 CATEGORIES_TREE = {
     "cs": ["AI", "LG", "SY", "RO", "NE", "CE"],
     "eess": ["SY", "SP"],
@@ -41,31 +58,33 @@ CATEGORIES_TREE = {
 CATEGORIES = [f"{l1}.{l2}" for l1, subs in CATEGORIES_TREE.items() for l2 in subs]
 PAPERS_PER_TAG = 5
 
-# Two-host podcast voices — use multilingual neural for more natural, conversational flow (still free Edge TTS)
-# Override with EDGE_TTS_VOICE_ALEX / EDGE_TTS_VOICE_SAM in .env if you prefer Guy/Jenny or others.
-EDGE_TTS_VOICE_ALEX = os.environ.get("EDGE_TTS_VOICE_ALEX", "en-US-AndrewMultilingualNeural")   # male
-EDGE_TTS_VOICE_SAM = os.environ.get("EDGE_TTS_VOICE_SAM", "en-US-EmmaMultilingualNeural")     # female
+# Two-host podcast voices (Edge TTS)
+EDGE_TTS_VOICE_ALEX = os.environ.get("EDGE_TTS_VOICE_ALEX", "en-US-AndrewMultilingualNeural")
+EDGE_TTS_VOICE_SAM = os.environ.get("EDGE_TTS_VOICE_SAM", "en-US-EmmaMultilingualNeural")
 
-# TTS engine: "edge" (default, free) | "openai" (ChatGPT-style natural voices; needs OPENAI_API_KEY)
+# TTS engine: edge | openai
 TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge").strip().lower()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-# OpenAI TTS: two distinct voices for Alex/Sam (marin/cedar recommended by OpenAI for quality)
-OPENAI_TTS_VOICE_ALEX = os.environ.get("OPENAI_TTS_VOICE_ALEX", "cedar")   # male
-OPENAI_TTS_VOICE_SAM = os.environ.get("OPENAI_TTS_VOICE_SAM", "nova")     # female
-OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1-hd")  # or gpt-4o-mini-tts for more expressiveness
+OPENAI_TTS_VOICE_ALEX = os.environ.get("OPENAI_TTS_VOICE_ALEX", "cedar")
+OPENAI_TTS_VOICE_SAM = os.environ.get("OPENAI_TTS_VOICE_SAM", "nova")
+OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1-hd")
 
-# --- AI CONFIGURATION (key from .env only; never commit .env) ---
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
 LLM_MODEL = "arcee-ai/trinity-large-preview:free"
-AUDIO_OUTPUT = "/home/rishav/weblogger/static/audio/daily_briefing.mp3"
+
+# Podcast presets
+PODCAST_STYLES = {
+    "easy": "Easy to Understand: use plain language, minimal jargon, and simple analogies. Explain concepts as if to a curious non-expert.",
+    "deep": "DeepDive: go into technical depth—methods, assumptions, and implications. Suitable for researchers and practitioners.",
+    "critique": "Critique: take a critical lens. Discuss limitations, trade-offs, and what the work does not address.",
+    "debate": "Debate: two hosts take different angles or gently disagree (e.g. one optimistic, one cautious) and bounce ideas off each other.",
+}
+LENGTH_WORDS = {"short": "300–500", "medium": "700–1000", "long": "1200–1800"}
 
 
 def _synthesize_segment(engine: str, speaker: str, text: str, out_path: str) -> None:
-    """Synthesize one (speaker, text) segment to MP3 at out_path. engine is 'edge' or 'openai'."""
     if engine == "openai":
-        voice_alex = OPENAI_TTS_VOICE_ALEX
-        voice_sam = OPENAI_TTS_VOICE_SAM
-        voice = voice_alex if speaker == "ALEX" else voice_sam
+        voice = OPENAI_TTS_VOICE_ALEX if speaker == "ALEX" else OPENAI_TTS_VOICE_SAM
         client = OpenAI(api_key=OPENAI_API_KEY)
         with client.audio.speech.with_streaming_response.create(
             model=OPENAI_TTS_MODEL,
@@ -75,7 +94,6 @@ def _synthesize_segment(engine: str, speaker: str, text: str, out_path: str) -> 
         ) as response:
             response.stream_to_file(out_path)
         return
-    # Edge TTS
     voice_map = {"ALEX": EDGE_TTS_VOICE_ALEX, "SAM": EDGE_TTS_VOICE_SAM}
     voice = voice_map.get(speaker, EDGE_TTS_VOICE_ALEX)
     communicate = edge_tts.Communicate(text, voice)
@@ -83,15 +101,15 @@ def _synthesize_segment(engine: str, speaker: str, text: str, out_path: str) -> 
 
 
 def init_db():
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute('''CREATE TABLE IF NOT EXISTS papers 
+    conn.execute("""CREATE TABLE IF NOT EXISTS papers
                     (id TEXT, category TEXT, title TEXT, url TEXT, date TEXT, abstract TEXT, other_categories TEXT,
-                     PRIMARY KEY (id, category))''')
+                     PRIMARY KEY (id, category))""")
     cursor = conn.execute("PRAGMA table_info(papers)")
     cols = [c[1] for c in cursor.fetchall()]
     if "other_categories" not in cols:
         conn.execute("ALTER TABLE papers ADD COLUMN other_categories TEXT DEFAULT ''")
-    # Migrate single-column PK to composite (id, category) so same paper can appear per category
     cursor = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='papers'")
     row = cursor.fetchone()
     if row and row[0] and "PRIMARY KEY (id, category)" not in row[0]:
@@ -110,21 +128,16 @@ def init_db():
 
 
 def clear_papers():
-    """Delete all rows from the papers table. Leaves table structure intact."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DELETE FROM papers")
     conn.commit()
     conn.close()
 
-# XML namespaces used in arXiv Atom responses
+
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
+
 def _fetch_by_date_http(category, papers_per_tag, date):
-    """
-    Fetch papers for a single category and date via direct arXiv API HTTP call.
-    Returns list of (entry_id, title, pdf_url, date_str, abstract, other_categories).
-    other_categories is comma-separated list of all categories except the primary (for "Secondary tags" column).
-    """
     ymd = date.replace("-", "")
     query = f"cat:{category} AND submittedDate:[{ymd}0000 TO {ymd}2359]"
     params = {
@@ -133,8 +146,7 @@ def _fetch_by_date_http(category, papers_per_tag, date):
         "sortBy": "submittedDate",
         "sortOrder": "descending",
     }
-    url = "https://export.arxiv.org/api/query"
-    resp = requests.get(url, params=params, timeout=30)
+    resp = requests.get("https://export.arxiv.org/api/query", params=params, timeout=30)
     resp.raise_for_status()
     root = ET.fromstring(resp.content)
     rows = []
@@ -148,11 +160,7 @@ def _fetch_by_date_http(category, papers_per_tag, date):
             if link.get("title") == "pdf":
                 link_pdf = link.get("href")
                 break
-        primary_el = entry.find("arxiv:primary_category", _ATOM_NS)
         all_cats = [c.get("term") for c in entry.findall("atom:category", _ATOM_NS) if c.get("term")]
-        primary_cat = primary_el.get("term", category) if primary_el is not None else (all_cats[0] if all_cats else category)
-        # For the "Other tags" column, always exclude the domain we're displaying (category/cat),
-        # not just the primary arXiv category, so the main tag does not appear twice.
         other = [t for t in all_cats if t != category]
         other_categories = ", ".join(sorted(other)) if other else ""
         if entry_id is None or title_el is None:
@@ -170,26 +178,20 @@ def _fetch_by_date_http(category, papers_per_tag, date):
         rows.append((eid, title, pdf_url, date_str, summary, other_categories))
     return rows
 
+
 def fetch_and_store(categories=None, papers_per_tag=None, date=None):
-    """
-    Fetch papers from arXiv and store in DB.
-    If date is provided (YYYY-MM-DD), only papers submitted on that day (GMT) are fetched
-    via direct API HTTP call (reliable date filter). Otherwise uses arxiv library for latest papers.
-    """
     categories = categories or CATEGORIES
     papers_per_tag = papers_per_tag if papers_per_tag is not None else PAPERS_PER_TAG
     conn = sqlite3.connect(DB_PATH)
     total_found = 0
     new_added = 0
     if date:
-        # Date-filtered fetch: use direct HTTP so the query is sent exactly as arXiv expects
         for cat in categories:
             print(f"Finding papers in category: {cat} for date {date}")
             try:
                 rows = _fetch_by_date_http(cat, papers_per_tag, date)
                 for row in rows:
                     total_found += 1
-                    # (id, category, title, url, date, abstract, other_categories); composite PK allows same paper under multiple categories
                     conn.execute(
                         "INSERT OR IGNORE INTO papers (id, category, title, url, date, abstract, other_categories) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (row[0], cat, row[1], row[2], row[3], row[4], row[5]),
@@ -198,7 +200,6 @@ def fetch_and_store(categories=None, papers_per_tag=None, date=None):
             except requests.RequestException as e:
                 print(f"  Request failed for {cat}: {e}")
     else:
-        # No date: use arxiv library (newest papers)
         client = arxiv.Client()
         for cat in categories:
             print(f"Finding papers in category: {cat}")
@@ -211,11 +212,12 @@ def fetch_and_store(categories=None, papers_per_tag=None, date=None):
                 total_found += 1
                 other = ""
                 if hasattr(result, "categories") and result.categories:
-                    # Exclude the domain we're displaying (cat) from "Other tags" so it doesn't duplicate
                     other = ", ".join(sorted(c for c in result.categories if c != cat))
+                # Short id so same paper from HTTP path and library path dedupes on (id, category)
+                paper_id = result.get_short_id() if hasattr(result, "get_short_id") and callable(getattr(result, "get_short_id")) else (result.entry_id.split("/")[-1] if "/" in str(result.entry_id) else result.entry_id)
                 conn.execute(
                     "INSERT OR IGNORE INTO papers (id, category, title, url, date, abstract, other_categories) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (result.entry_id, cat, result.title, result.pdf_url, result.published.strftime("%Y-%m-%d"), result.summary, other),
+                    (paper_id, cat, result.title, result.pdf_url, result.published.strftime("%Y-%m-%d"), result.summary, other),
                 )
                 new_added += conn.execute("SELECT changes()").fetchone()[0]
     conn.commit()
@@ -224,37 +226,23 @@ def fetch_and_store(categories=None, papers_per_tag=None, date=None):
     print(f">> DATABASE: Added {new_added} new papers to the archive.\n")
     return {"total_found": total_found, "new_added": new_added}
 
+
 def _build_matrix_table(rows, empty_message):
-    """Build the matrix table HTML from rows. New schema: (id, category, title, url, date, abstract, other_categories)."""
     if not rows:
         return empty_message
-    # New schema has 7 cols; old (pre-migration) has 6: (id, title, url, date, category, abstract)
     new_schema = len(rows[0]) >= 7
     html = '<div class="overflow-x-auto"><table class="w-full text-left border-collapse">'
     current_date = ""
     for row in rows:
         if new_schema:
             row_id, tag, title, url, date_val, abstract, other_cats = (
-                row[0],
-                row[1],
-                row[2],
-                row[3],
-                row[4],
-                row[5],
-                (row[6] or "").strip(),
+                row[0], row[1], row[2], row[3], row[4], row[5], (row[6] or "").strip(),
             )
         else:
-            # Legacy: (id, title, url, date, category, abstract)
             row_id, tag, title, url, date_val, abstract, other_cats = (
-                row[0],
-                row[4],
-                row[1],
-                row[2],
-                row[3],
-                row[5],
-                "",
+                row[0], row[4], row[1], row[2], row[3], row[5], "",
             )
-        tag_class = tag.replace('.', '-')
+        tag_class = tag.replace(".", "-")
         if date_val != current_date:
             current_date = date_val
             html += f'''
@@ -298,17 +286,11 @@ def _build_matrix_table(rows, empty_message):
                 </div>
             </td>
         </tr>'''
-    html += '</tbody></table></div>'
+    html += "</tbody></table></div>"
     return html
 
 
 def get_matrix_html(limit=120, date=None, categories=None, papers_per_tag=None):
-    """
-    Return matrix HTML string filtered by date and categories.
-    - date=None: use latest date in DB only.
-    - categories=None: all categories; else list of category strings (e.g. ['cs.AI', 'cs.LG']).
-    - papers_per_tag: if set, show at most this many papers per category (keeps display consistent with fetch).
-    """
     conn = sqlite3.connect(DB_PATH)
     empty_msg = '<div class="p-6 text-slate-500 text-sm">No papers match. Run <strong>Search &amp; Populate</strong> or change filters.</div>'
     if date:
@@ -327,17 +309,15 @@ def get_matrix_html(limit=120, date=None, categories=None, papers_per_tag=None):
         placeholders = ",".join("?" * len(categories))
         where += f" AND category IN ({placeholders})"
         params.extend(categories)
-    # Fetch all matching rows (up to a generous cap), then apply per-category limit in Python
     cursor = conn.execute(
         f"SELECT * FROM papers WHERE {where} ORDER BY category ASC, id ASC",
-        params
+        params,
     )
     rows = cursor.fetchall()
     conn.close()
     if papers_per_tag is not None and papers_per_tag > 0 and rows:
-        from collections import OrderedDict
         by_cat = OrderedDict()
-        cat_idx = 1 if len(rows[0]) >= 7 else 4  # new: (id, category, ...); old: (id, title, url, date, category, abstract)
+        cat_idx = 1 if len(rows[0]) >= 7 else 4
         for row in rows:
             cat = row[cat_idx]
             if cat not in by_cat:
@@ -353,24 +333,14 @@ def get_matrix_html(limit=120, date=None, categories=None, papers_per_tag=None):
 
 
 def generate_html(limit=120, date=None, papers_per_tag=None):
-    """Generate matrix HTML and write to OUTPUT_HTML (used after fetch). Uses latest date when date is None."""
     html = get_matrix_html(limit=limit, date=date, categories=None, papers_per_tag=papers_per_tag)
-    if not html or html.startswith("<div class=\"p-6"):
+    if not html or html.startswith('<div class="p-6'):
         empty = '<div class="p-6 text-slate-500 text-sm">No papers in the database for this date. Run <strong>Search &amp; Populate</strong> to fetch from arXiv (newest submissions will be stored).</div>'
         with open(OUTPUT_HTML, "w") as f:
             f.write(empty)
         return
     with open(OUTPUT_HTML, "w") as f:
         f.write(html)
-
-# Podcast style and length presets
-PODCAST_STYLES = {
-    "easy": "Easy to Understand: use plain language, minimal jargon, and simple analogies. Explain concepts as if to a curious non-expert.",
-    "deep": "DeepDive: go into technical depth—methods, assumptions, and implications. Suitable for researchers and practitioners.",
-    "critique": "Critique: take a critical lens. Discuss limitations, trade-offs, and what the work does not address.",
-    "debate": "Debate: two hosts take different angles or gently disagree (e.g. one optimistic, one cautious) and bounce ideas off each other.",
-}
-LENGTH_WORDS = {"short": "300–500", "medium": "700–1000", "long": "1200–1800"}
 
 
 def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=None, date=None, paper_ids=None):
@@ -391,10 +361,9 @@ def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=No
         )
         rows = cursor.fetchall()
         if not rows:
-            conn.close()
             print("No matching papers for requested IDs; falling back to date-based selection.")
+            # conn left open so the if not papers: block below can use it for date-based selection
         else:
-            # Deduplicate by (title, category) in case multiple rows share an id
             seen = set()
             for title, category, abstract, d in rows:
                 key = (title, category)
@@ -402,7 +371,6 @@ def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=No
                     continue
                 seen.add(key)
                 papers.append((title, category, abstract))
-            # Use the most recent date among the selected papers for logging/metadata
             dates = [d for _, _, _, d in rows if d]
             if dates:
                 target_date = max(dates)
@@ -427,11 +395,11 @@ def generate_podcast_and_synopsis(style="easy", length="medium", custom_style=No
         conn.close()
     else:
         print(f"Targeting {len(papers)} selected papers for podcast (latest date: {target_date}).")
+        conn.close()
 
     if not OPENROUTER_KEY:
         raise RuntimeError(
-            "OPENROUTER_KEY not set. Add it to intel-stack/.env (see .env.example). "
-            "Do not commit .env to git."
+            "OPENROUTER_KEY not set. Add it to arxvicast/.env (see .env.example). Do not commit .env to git."
         )
     intel_data = "\n\n".join([f"Category: {p[1]} | Title: {p[0]} | Abstract: {p[2]}" for p in papers])
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_KEY)
@@ -453,14 +421,13 @@ Write the full script (headlines round first, then main dialogue) using only "AL
     try:
         response = client.chat.completions.create(
             model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
         script_text = response.choices[0].message.content
     except Exception as e:
         print(f"LLM Generation Failed: {e}")
         return None
 
-    # Build HTML with speaker styling (ALEX: / SAM:)
     html_parts = []
     for block in script_text.split("\n\n"):
         block = block.strip()
@@ -481,8 +448,7 @@ Write the full script (headlines round first, then main dialogue) using only "AL
     with open(SYNOPSIS_OUTPUT, "w") as f:
         f.write("\n".join(html_parts))
 
-    # TTS: two-host style — each host gets a distinct voice, segments concatenated for a real back-and-forth
-    segments = []  # list of ("ALEX" | "SAM", text)
+    segments = []
     for line in script_text.split("\n"):
         line = line.strip()
         if not line:
@@ -492,7 +458,6 @@ Write the full script (headlines round first, then main dialogue) using only "AL
         elif line.upper().startswith("SAM:"):
             segments.append(("SAM", line[4:].strip()))
         else:
-            # Unlabeled line: assign to last speaker or default to ALEX
             speaker = segments[-1][0] if segments else "ALEX"
             segments.append((speaker, line))
 
@@ -514,7 +479,6 @@ Write the full script (headlines round first, then main dialogue) using only "AL
             path = os.path.join(temp_dir, f"seg_{i:04d}.mp3")
             _synthesize_segment(engine, speaker, text, path)
             paths.append(path)
-        # Concatenate in order
         combined = None
         for path in paths:
             seg = AudioSegment.from_mp3(path)
@@ -544,7 +508,9 @@ Write the full script (headlines round first, then main dialogue) using only "AL
         print(f">> ERROR: Rclone upload failed. {e}")
     return {"script_length": len(script_text), "date": target_date}
 
-if __name__ == "__main__":
+
+def main_cli():
+    """CLI entry point (e.g. python -m arxvicast.core)."""
     import argparse
     p = argparse.ArgumentParser(description="ArxivCast: fetch arXiv papers and generate podcast")
     p.add_argument("--fetch-only", action="store_true", help="Only fetch and store papers")
@@ -563,3 +529,7 @@ if __name__ == "__main__":
     if not args.fetch_only:
         generate_html(limit=args.limit, date=view_date)
         generate_podcast_and_synopsis(style=args.style, length=args.length, custom_style=args.custom_style, date=view_date)
+
+
+if __name__ == "__main__":
+    main_cli()
