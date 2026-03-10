@@ -134,6 +134,30 @@ def clear_papers():
     conn.close()
 
 
+def get_papers_context(paper_ids, max_abstract_len=400):
+    """Return a string of title + abstract for each paper, for voice/system prompts. Dedupes by id."""
+    if not paper_ids:
+        return ""
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ",".join("?" * len(paper_ids))
+    cursor = conn.execute(
+        f"SELECT id, title, abstract FROM papers WHERE id IN ({placeholders}) LIMIT 50",
+        list(paper_ids)[:50],
+    )
+    seen = set()
+    parts = []
+    for paper_id, title, abstract in cursor.fetchall():
+        if paper_id in seen:
+            continue
+        seen.add(paper_id)
+        ab = (abstract or "").strip()
+        if len(ab) > max_abstract_len:
+            ab = ab[: max_abstract_len] + "..."
+        parts.append(f"- {title}\n  {ab}")
+    conn.close()
+    return "\n\n".join(parts)
+
+
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
 

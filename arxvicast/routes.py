@@ -1,5 +1,6 @@
 """ArxivCast routes: /intel and /api/arxiv/*. All ArxivCast logic lives in core; routes delegate and serve generated HTML."""
 
+import json
 from datetime import datetime
 
 from flask import Response, jsonify, render_template, request
@@ -112,6 +113,69 @@ def podcast():
         return jsonify({"ok": True, "result": result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@arxvicast_bp.route("/api/arxiv/voice/status", methods=["GET"])
+def voice_status():
+    """Report availability of STT, LLM, TTS for fallback messaging (config-based, no heavy model load)."""
+    try:
+        from . import voice_config as vc
+        try:
+            import faster_whisper
+            stt_ok = True
+        except ImportError:
+            stt_ok = False
+        llm_ok = vc.VOICE_LLM_PROVIDER in ("ollama", "openrouter", "nvidia_nim", "nvidia-nim")
+        if vc.VOICE_LLM_PROVIDER == "openrouter":
+            llm_ok = bool(vc.OPENROUTER_KEY)
+        elif "nim" in (vc.VOICE_LLM_PROVIDER or ""):
+            llm_ok = bool(vc.NIM_CHAT_URL)
+        tts_ok = bool(vc.get_piper_voice_path())
+        try:
+            import piper
+            tts_ok = tts_ok and True
+        except ImportError:
+            tts_ok = False
+        return jsonify({
+            "stt": stt_ok,
+            "llm": llm_ok,
+            "tts": tts_ok,
+            "message": None if (stt_ok and llm_ok and tts_ok) else "One or more voice services need setup. See docs/VOICE_SETUP.md.",
+        })
+    except Exception as e:
+        return jsonify({"stt": False, "llm": False, "tts": False, "message": str(e)})
+
+
+@arxvicast_bp.route("/api/arxiv/voice/turn", methods=["POST"])
+def voice_turn():
+    """Stream one voice turn: audio (base64) -> STT -> LLM stream -> TTS stream. Chunked NDJSON."""
+    data = request.get_json(force=True, silent=True) or {}
+    audio_b64 = data.get("audio")
+    paper_ids = data.get("paper_ids")
+    if isinstance(paper_ids, list):
+        paper_ids = [str(p).strip() for p in paper_ids if str(p).strip()]
+    else:
+        paper_ids = None
+    conversation_history = data.get("conversation_history") or []
+
+    if not audio_b64:
+        return jsonify({"error": "Missing audio"}), 400
+
+    from . import voice_pipeline
+
+    def generate():
+        for event in voice_pipeline.run_voice_turn(
+            audio_b64=audio_b64,
+            paper_ids=paper_ids,
+            conversation_history=conversation_history,
+        ):
+            yield json.dumps(event) + "\n"
+
+    return Response(
+        generate(),
+        mimetype="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @arxvicast_bp.route("/api/arxiv/categories")

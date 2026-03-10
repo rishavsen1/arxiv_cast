@@ -151,6 +151,20 @@
                         </div>
                     </div>
                     <div class="border-t border-slate-800 pt-4">
+                        <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-2"><span>🎤</span> Voice chat</h3>
+                        <p id="voice-status-msg" class="text-xs text-slate-500 mb-2 hidden"></p>
+                        <div class="flex items-center gap-2 mb-2">
+                            <button type="button" id="voice-mic-btn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <span id="voice-mic-icon">🎤</span>
+                                <span id="voice-mic-label">Start voice</span>
+                            </button>
+                            <button type="button" id="voice-stop-btn" class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm font-semibold rounded-lg transition hidden">Stop</button>
+                        </div>
+                        <div id="voice-transcript" class="text-sm text-slate-400 max-h-48 overflow-y-auto pr-2 space-y-2 border border-slate-700 rounded-lg p-3 min-h-[80px]">
+                            <p class="text-slate-500 italic">Start a voice conversation. Context from selected papers above will be used.</p>
+                        </div>
+                    </div>
+                    <div class="border-t border-slate-800 pt-4">
                         <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-3">Transcript</h3>
                         <div id="synopsis-container" class="text-sm text-slate-400 max-h-64 overflow-y-auto pr-2">
                             <p class="text-slate-500">Generate a podcast to see the transcript here.</p>
@@ -382,6 +396,273 @@
         }
 
         document.getElementById('podcast-generate-btn').addEventListener('click', doGeneratePodcast);
+
+        // —— Voice chat: status, record WAV, stream turn, play PCM ——
+        (function() {
+            var voiceStatusEl = document.getElementById('voice-status-msg');
+            var micBtn = document.getElementById('voice-mic-btn');
+            var micIcon = document.getElementById('voice-mic-label');
+            var stopBtn = document.getElementById('voice-stop-btn');
+            var transcriptEl = document.getElementById('voice-transcript');
+            var voiceAbortController = null;
+            var voiceConversationHistory = [];
+            var isRecording = false;
+            var mediaStream = null;
+            var audioContext = null;
+            var processor = null;
+            var pcmChunks = [];
+            var sampleRate = 16000;
+
+            function getVoicePaperIds() {
+                var checked = document.querySelectorAll('#matrix-container input[name=matrix-paper]:checked');
+                var ids = Array.from(checked).map(function(cb) { return cb.value; });
+                if (ids.length === 0) {
+                    ids = Array.from(document.querySelectorAll('#matrix-container tr[data-paper-id]')).map(function(tr) { return tr.getAttribute('data-paper-id'); });
+                }
+                return ids.filter(Boolean);
+            }
+
+            function showVoiceStatus(msg, isError) {
+                voiceStatusEl.classList.remove('hidden');
+                voiceStatusEl.textContent = msg;
+                voiceStatusEl.className = 'text-xs mt-2 ' + (isError ? 'text-red-400' : 'text-slate-400');
+            }
+
+            function appendToTranscript(who, text) {
+                if (!text || !text.trim()) return;
+                var p = document.createElement('p');
+                p.className = who === 'user' ? 'text-sky-300' : 'text-slate-300';
+                p.innerHTML = '<strong>' + (who === 'user' ? 'You' : 'Assistant') + ':</strong> ' + text.trim();
+                transcriptEl.appendChild(p);
+                transcriptEl.scrollTop = transcriptEl.scrollHeight;
+            }
+
+            function appendAssistantDelta(delta) {
+                var last = transcriptEl.querySelector('.voice-assistant-current');
+                if (!last) {
+                    last = document.createElement('p');
+                    last.className = 'text-slate-300 voice-assistant-current';
+                    last.innerHTML = '<strong>Assistant:</strong> ';
+                    transcriptEl.appendChild(last);
+                    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+                }
+                last.appendChild(document.createTextNode(delta));
+                transcriptEl.scrollTop = transcriptEl.scrollHeight;
+            }
+
+            function finalizeAssistantLine() {
+                var last = transcriptEl.querySelector('.voice-assistant-current');
+                if (last) {
+                    last.classList.remove('voice-assistant-current');
+                }
+            }
+
+            function buildWavBlob(pcmInt16, sr) {
+                var numChannels = 1;
+                var bytesPerSample = 2;
+                var blockAlign = numChannels * bytesPerSample;
+                var byteRate = sr * blockAlign;
+                var dataSize = pcmInt16.length * bytesPerSample;
+                var buffer = new ArrayBuffer(44 + dataSize);
+                var view = new DataView(buffer);
+                function writeStr(offset, str) {
+                    for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+                }
+                writeStr(0, 'RIFF');
+                view.setUint32(4, 36 + dataSize, true);
+                writeStr(8, 'WAVE');
+                writeStr(12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sr, true);
+                view.setUint32(28, byteRate, true);
+                view.setUint16(32, blockAlign, true);
+                view.setUint16(34, 16, true);
+                writeStr(36, 'data');
+                view.setUint32(40, dataSize, true);
+                for (var i = 0; i < pcmInt16.length; i++) {
+                    view.setInt16(44 + i * 2, pcmInt16[i], true);
+                }
+                return new Blob([buffer], { type: 'audio/wav' });
+            }
+
+            function startRecording() {
+                pcmChunks = [];
+                sampleRate = 16000;
+                return navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+                    mediaStream = stream;
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    sampleRate = audioContext.sampleRate;
+                    var source = audioContext.createMediaStreamSource(stream);
+                    var bufferSize = 4096;
+                    processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+                    processor.onaudioprocess = function(e) {
+                        if (!isRecording) return;
+                        var input = e.inputBuffer.getChannelData(0);
+                        for (var i = 0; i < input.length; i++) {
+                            var s = Math.max(-1, Math.min(1, input[i]));
+                            pcmChunks.push(s < 0 ? s * 0x8000 : s * 0x7FFF);
+                        }
+                    };
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+                    isRecording = true;
+                    showVoiceStatus('Recording… Click Stop when done.');
+                    micBtn.querySelector('#voice-mic-label').textContent = 'Stop & send';
+                    stopBtn.classList.add('hidden');
+                }).catch(function(err) {
+                    showVoiceStatus('Microphone error: ' + err.message, true);
+                });
+            }
+
+            function stopRecordingAndSend() {
+                if (!isRecording || !mediaStream) return;
+                isRecording = false;
+                if (processor) {
+                    try { processor.disconnect(); } catch (e) {}
+                }
+                mediaStream.getTracks().forEach(function(t) { t.stop(); });
+                mediaStream = null;
+                processor = null;
+                if (pcmChunks.length === 0) {
+                    showVoiceStatus('No audio recorded.');
+                    micBtn.querySelector('#voice-mic-label').textContent = 'Start voice';
+                    return;
+                }
+                var pcmInt16 = new Int16Array(pcmChunks.length);
+                for (var i = 0; i < pcmChunks.length; i++) pcmInt16[i] = pcmChunks[i];
+                var blob = buildWavBlob(pcmInt16, sampleRate);
+                micBtn.querySelector('#voice-mic-label').textContent = 'Start voice';
+                micBtn.disabled = true;
+                showVoiceStatus('Sending…');
+                var reader = new FileReader();
+                reader.onloadend = function() {
+                    var b64 = reader.result.split(',')[1];
+                    if (!b64) {
+                        showVoiceStatus('Failed to encode audio.', true);
+                        micBtn.disabled = false;
+                        return;
+                    }
+                    sendVoiceTurn(b64);
+                };
+                reader.readAsDataURL(blob);
+            }
+
+            function sendVoiceTurn(audioB64) {
+                voiceAbortController = new AbortController();
+                stopBtn.classList.remove('hidden');
+                stopBtn.onclick = function() {
+                    if (voiceAbortController) voiceAbortController.abort();
+                };
+                var playQueue = [];
+                var audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
+                var nextStartTime = audioCtx.currentTime;
+                function playPcmChunk(base64Pcm, sr) {
+                    var binary = atob(base64Pcm);
+                    var bytes = new Uint8Array(binary.length);
+                    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                    var int16 = new Int16Array(bytes.buffer);
+                    var float32 = new Float32Array(int16.length);
+                    for (var i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+                    var buffer = audioCtx.createBuffer(1, float32.length, sr || 22050);
+                    buffer.getChannelData(0).set(float32);
+                    var source = audioCtx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(audioCtx.destination);
+                    source.start(nextStartTime);
+                    nextStartTime += buffer.duration;
+                }
+                fetch('/api/arxiv/voice/turn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        audio: audioB64,
+                        paper_ids: getVoicePaperIds(),
+                        conversation_history: voiceConversationHistory
+                    }),
+                    signal: voiceAbortController.signal
+                }).then(function(response) {
+                    if (!response.ok) throw new Error(response.statusText);
+                    return response.body.getReader();
+                }).then(function(reader) {
+                    var decoder = new TextDecoder();
+                    var buf = '';
+                    var currentUserText = '';
+                    var currentAssistantText = '';
+                    return reader.read().then(function processChunk(result) {
+                        if (result.done) {
+                            finalizeAssistantLine();
+                            if (micBtn.disabled) {
+                                showVoiceStatus('Done.');
+                                stopBtn.classList.add('hidden');
+                                micBtn.disabled = false;
+                            }
+                            return;
+                        }
+                        buf += decoder.decode(result.value, { stream: true });
+                        var lines = buf.split('\n');
+                        buf = lines.pop();
+                        for (var i = 0; i < lines.length; i++) {
+                            var line = lines[i].trim();
+                            if (!line) continue;
+                            try {
+                                var ev = JSON.parse(line);
+                                if (ev.event === 'status' && ev.message) showVoiceStatus(ev.message);
+                                if (ev.event === 'user_transcript' && ev.text) {
+                                    currentUserText = ev.text;
+                                    appendToTranscript('user', ev.text);
+                                }
+                                if (ev.event === 'assistant_text' && ev.delta) {
+                                    currentAssistantText += ev.delta;
+                                    appendAssistantDelta(ev.delta);
+                                }
+                                if (ev.event === 'audio' && ev.base64) {
+                                    playPcmChunk(ev.base64, ev.sample_rate || 22050);
+                                }
+                                if (ev.event === 'done') {
+                                    finalizeAssistantLine();
+                                    if (currentUserText) voiceConversationHistory.push({ role: 'user', content: currentUserText });
+                                    if (currentAssistantText) voiceConversationHistory.push({ role: 'assistant', content: currentAssistantText });
+                                    showVoiceStatus('Done.');
+                                    stopBtn.classList.add('hidden');
+                                    micBtn.disabled = false;
+                                }
+                                if (ev.event === 'error') {
+                                    showVoiceStatus(ev.message || 'Error', true);
+                                    finalizeAssistantLine();
+                                    stopBtn.classList.add('hidden');
+                                    micBtn.disabled = false;
+                                }
+                            } catch (e) { /* skip bad line */ }
+                        }
+                        return reader.read().then(processChunk);
+                    });
+                }).catch(function(err) {
+                    if (err.name === 'AbortError') showVoiceStatus('Stopped.');
+                    else showVoiceStatus('Error: ' + err.message, true);
+                    finalizeAssistantLine();
+                    stopBtn.classList.add('hidden');
+                    micBtn.disabled = false;
+                });
+            }
+
+            micBtn.addEventListener('click', function() {
+                if (isRecording) {
+                    stopRecordingAndSend();
+                } else {
+                    startRecording();
+                }
+            });
+
+            fetch('/api/arxiv/voice/status').then(function(r) { return r.json(); }).then(function(data) {
+                if (!data.stt || !data.llm || !data.tts) {
+                    voiceStatusEl.classList.remove('hidden');
+                    voiceStatusEl.textContent = data.message || 'Voice services need setup. See docs/VOICE_SETUP.md';
+                    voiceStatusEl.className = 'text-xs text-amber-400 mt-2';
+                }
+            }).catch(function() {});
+        })();
 
         fetch('/api/archive')
             .then(function(r) { return r.json(); })

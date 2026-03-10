@@ -8,3 +8,8 @@ arxiv
 openai
 edge-tts
 pydub
+
+# Voice conversation (STT, TTS) - optional; install for /intel voice chat
+faster-whisper
+piper-tts
+scipy
